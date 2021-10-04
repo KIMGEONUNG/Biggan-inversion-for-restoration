@@ -41,14 +41,14 @@ def parse():
 
     # Loss
     parser.add_argument('--loss_mse', action='store_true', default=True)
-    parser.add_argument('--loss_lpips', action='store_true', default=True)
+    parser.add_argument('--loss_lpips', action='store_true', default=False)
     return parser.parse_args()
 
 
 def set_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed) # if use multi-GPU
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     np.random.seed(seed)
@@ -56,6 +56,7 @@ def set_seed(seed):
 
 
 def main(args):
+    print(args)
 
     if not os.path.exists(args.path_history):
         os.mkdir(args.path_history)
@@ -122,7 +123,8 @@ def main(args):
             im_output.save(path)
             losses.append(loss.item())
             losses_mse.append(loss_mse.item())
-            losses_lpips.append(loss_lpips.item())
+            if args.loss_lpips:
+                losses_lpips.append(loss_lpips.item())
 
     _, axs = plt.subplots(1, 2)
 
@@ -149,9 +151,15 @@ def main(args):
     plt.savefig(path)
 
     # loss log
-    log = "total\tmse\tlpips\n"
-    for l1, l2, l3 in zip(losses, losses_mse, losses_lpips):
-        log += "%6.4f\t%6.4f\t%6.4f\n" % (l1, l2, l3)
+
+    if args.loss_lpips:
+        log = "total\tmse\tlpips\n"
+        for l1, l2, l3 in zip(losses, losses_mse, losses_lpips):
+            log += "%6.4f\t%6.4f\t%6.4f\n" % (l1, l2, l3)
+    else:
+        log = "total\tmse\n"
+        for l1, l2, l3 in zip(losses, losses_mse):
+            log += "%6.4f\t%6.4f\n" % (l1, l2)
 
     with open(join(args.path_history, 'log_loss.txt'), 'w') as f:
         f.write(log)
