@@ -14,7 +14,7 @@ def parse():
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
     parser.add_argument('--size_batch', type=int, default=16)
-    parser.add_argument('--truncation', type=float, default=0.8)
+    parser.add_argument('--truncation', type=float, default=1.0)
     parser.add_argument('--show', action='store_false')
     return parser.parse_args()
 
