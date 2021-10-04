@@ -1,3 +1,4 @@
 samples
 *.jpg
 __pycache__
+*log_loss.txt
