@@ -16,12 +16,16 @@ from os.path import join
 import argparse
 
 from model import VGG16Perceptual
+import numpy as np
+import random
 
 DEV = 'cuda'
 
 
 def parse():
     parser = argparse.ArgumentParser()
+
+    parser.add_argument('--seed', type=int, default=1)
 
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
@@ -41,10 +45,23 @@ def parse():
     return parser.parse_args()
 
 
+def set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # if use multi-GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    random.seed(seed)
+
+
 def main(args):
 
     if not os.path.exists(args.path_history):
         os.mkdir(args.path_history)
+
+    if args.seed >= 0:
+        set_seed(args.seed)
 
     im = Image.open(args.path_target)
     target = ToTensor()(im).unsqueeze(0).to(DEV)
@@ -130,6 +147,14 @@ def main(args):
     plt.legend(legends)
     path = join(args.path_history, './plot_loss.jpg')
     plt.savefig(path)
+
+    # loss log
+    log = "total\tmse\tlpips\n"
+    for l1, l2, l3 in zip(losses, losses_mse, losses_lpips):
+        log += "%6.4f\t%6.4f\t%6.4f\n" % (l1, l2, l3)
+
+    with open(join(args.path_history, 'log_loss.txt'), 'w') as f:
+        f.write(log)
 
 
 if __name__ == '__main__':
