@@ -5,8 +5,6 @@ import torch.nn as nn
 import torch.optim as optim
 from PIL import Image
 from torchvision.transforms import ToPILImage, ToTensor
-from torchvision.utils import make_grid
-from torchvision.transforms import ToPILImage
 from pytorch_pretrained_biggan import (BigGAN, one_hot_from_int,
         truncated_noise_sample)
 from tqdm import tqdm
@@ -18,14 +16,14 @@ import os.path
 from os.path import join
 import argparse
 
-DEV = 'cuda' 
+DEV = 'cuda'
 
 def parse():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
-    parser.add_argument('--iter', type=int, default=1000)
+    parser.add_argument('--iter', type=int, default=300)
     parser.add_argument('--interval_save', type=int, default=10)
     parser.add_argument('--size_batch', type=int, default=1)
     parser.add_argument('--truncation', type=float, default=1.0)
@@ -37,7 +35,7 @@ def parse():
 
     # Loss
     parser.add_argument('--loss_mse', action='store_true', default=True)
-    parser.add_argument('--loss_perceptual', action='store_true', default=True)
+    parser.add_argument('--loss_lpips', action='store_true', default=True)
     return parser.parse_args()
 
 
@@ -68,7 +66,7 @@ def main(args):
     name_model = 'biggan-deep-%s' % (args.resolution)
     model = BigGAN.from_pretrained(name_model)
     model.to(DEV)
-    if args.loss_perceptual:
+    if args.loss_lpips:
         loss_fn_vgg = lpips.LPIPS(net='vgg').to(DEV)
 
     # Optimizer
@@ -89,7 +87,7 @@ def main(args):
         if args.loss_mse:
             loss_mse = nn.MSELoss()(target, output)
             loss += loss_mse
-        if args.loss_perceptual:
+        if args.loss_lpips:
             loss_lpips = loss_fn_vgg(target, output).sum()
             loss += loss_lpips
 
@@ -119,8 +117,15 @@ def main(args):
 
     plt.clf()
     plt.plot(losses)
-    plt.plot(losses_mse)
-    plt.plot(losses_lpips)
+    legends = ['Total']
+    if args.loss_mse:
+        plt.plot(losses_mse)
+        legends += ['MSE']
+    if args.loss_lpips:
+        plt.plot(losses_lpips)
+        legends += ['LPIPS']
+
+    plt.legend(legends)
     path = join(args.path_history, './plot_loss.jpg')
     plt.savefig(path)
 
