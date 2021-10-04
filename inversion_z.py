@@ -9,21 +9,23 @@ from pytorch_pretrained_biggan import (BigGAN, one_hot_from_int,
         truncated_noise_sample)
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-import lpips
 
 import os
 import os.path
 from os.path import join
 import argparse
 
+from model import VGG16Perceptual
+
 DEV = 'cuda'
+
 
 def parse():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
-    parser.add_argument('--iter', type=int, default=300)
+    parser.add_argument('--iter', type=int, default=10000)
     parser.add_argument('--interval_save', type=int, default=10)
     parser.add_argument('--size_batch', type=int, default=1)
     parser.add_argument('--truncation', type=float, default=1.0)
@@ -67,7 +69,7 @@ def main(args):
     model = BigGAN.from_pretrained(name_model)
     model.to(DEV)
     if args.loss_lpips:
-        loss_fn_vgg = lpips.LPIPS(net='vgg').to(DEV)
+        vgg_per = VGG16Perceptual()
 
     # Optimizer
     optimizer = optim.Adam([noise_vector])
@@ -88,7 +90,7 @@ def main(args):
             loss_mse = nn.MSELoss()(target, output)
             loss += loss_mse
         if args.loss_lpips:
-            loss_lpips = loss_fn_vgg(target, output).sum()
+            loss_lpips = vgg_per.perceptual_loss(target, output)
             loss += loss_lpips
 
         optimizer.zero_grad()
