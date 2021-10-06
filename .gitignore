@@ -3,3 +3,6 @@ samples
 __pycache__
 *log_loss.txt
 runs
+runs.inversion
+dataset_encoder
+
