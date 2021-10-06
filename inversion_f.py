@@ -68,7 +68,7 @@ def main(args):
         set_seed(args.seed)
 
     # Logger
-    writer = SummaryWriter('runs/inversion_zf_feat%02d' % args.num_feat_layer)
+    writer = SummaryWriter('runs/inversion_f_feat%02d' % args.num_feat_layer)
 
     im = Image.open(args.path_target)
     target = ToTensor()(im).unsqueeze(0).to(DEV)
@@ -105,7 +105,7 @@ def main(args):
         output = output.add(1).div(2)
         writer.add_image('Initial', output.squeeze(0))
     f.requires_grad = True
-    optimizer = optim.Adam([noise_vector, f])
+    optimizer = optim.Adam([f])
 
     tbar = tqdm(range(args.iter))
     for i in tbar:
@@ -116,9 +116,7 @@ def main(args):
         # Loss
         loss = 0
         if args.loss_mse:
-            loss_mse = nn.MSELoss()(
-                    transforms.target,
-                    output)
+            loss_mse = nn.MSELoss()(target, output)
             loss += loss_mse
         if args.loss_lpips:
             loss_lpips = vgg_per.perceptual_loss(target, output)

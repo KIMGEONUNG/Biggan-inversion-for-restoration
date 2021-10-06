@@ -68,7 +68,7 @@ def main(args):
         set_seed(args.seed)
 
     # Logger
-    writer = SummaryWriter('runs/inversion_zf_feat%02d' % args.num_feat_layer)
+    writer = SummaryWriter('runs/gray_inversion_zf_feat%02d' % args.num_feat_layer)
 
     im = Image.open(args.path_target)
     target = ToTensor()(im).unsqueeze(0).to(DEV)
@@ -117,8 +117,8 @@ def main(args):
         loss = 0
         if args.loss_mse:
             loss_mse = nn.MSELoss()(
-                    transforms.target,
-                    output)
+                    transforms.Grayscale()(target),
+                    transforms.Grayscale()(output))
             loss += loss_mse
         if args.loss_lpips:
             loss_lpips = vgg_per.perceptual_loss(target, output)

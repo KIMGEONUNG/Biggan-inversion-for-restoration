@@ -3,8 +3,10 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 from PIL import Image
 from torchvision.transforms import ToPILImage, ToTensor
+import torchvision.transforms as transforms
 from pytorch_pretrained_biggan import (BigGAN, one_hot_from_int,
         truncated_noise_sample)
 from tqdm import tqdm
@@ -26,7 +28,8 @@ def parse():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=1)
-
+    # 5 --> 32, 4 --> 16, ...
+    parser.add_argument('--num_feat_layer', type=int, default=4)
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
     parser.add_argument('--iter', type=int, default=10000)
@@ -36,7 +39,7 @@ def parse():
     parser.add_argument('--show', action='store_false')
 
     # I/O
-    parser.add_argument('--path_history', type=str, default='inversion_z_hist')
+    parser.add_argument('--path_history', type=str, default='inversion_zf_hist')
     parser.add_argument('--path_target', type=str, default='./real.jpg')
 
     # Loss
@@ -64,8 +67,12 @@ def main(args):
     if args.seed >= 0:
         set_seed(args.seed)
 
+    # Logger
+    writer = SummaryWriter('runs/gray_inversion_z')
+
     im = Image.open(args.path_target)
     target = ToTensor()(im).unsqueeze(0).to(DEV)
+    writer.add_image('GT', target.squeeze(0))
 
     class_vector = one_hot_from_int([args.class_index],
             batch_size=args.size_batch)
@@ -90,16 +97,20 @@ def main(args):
         vgg_per = VGG16Perceptual()
 
     # Optimizer
+    with torch.no_grad():
+        f = model.forward_to(noise_vector, class_vector, args.truncation,
+                args.num_feat_layer)
+        output = model.forward_from(noise_vector, class_vector, args.truncation,
+                f, args.num_feat_layer)
+        output = output.add(1).div(2)
+        writer.add_image('Initial', output.squeeze(0))
+    f.requires_grad = True
     optimizer = optim.Adam([noise_vector])
-
-    # Loss
-    losses_mse = []
-    losses_lpips = []
-    losses = []
 
     tbar = tqdm(range(args.iter))
     for i in tbar:
-        output = model(noise_vector, class_vector, args.truncation)
+        output = model.forward_from(noise_vector, class_vector, args.truncation,
+                f, args.num_feat_layer)
         output = output.add(1).div(2)
 
         # Loss
@@ -117,52 +128,15 @@ def main(args):
         tbar.set_postfix(loss=loss.item())
 
         if i % args.interval_save == 0:
-            im_output = ToPILImage()(output.squeeze(0))
-            path = join(args.path_history,
-                    'inversion_z_%06d.jpg' % i)
-            im_output.save(path)
-            losses.append(loss.item())
-            losses_mse.append(loss_mse.item())
+            writer.add_image('recon', output.squeeze(0), i)
+            writer.add_scalar('total', loss.item(), i)
+            writer.add_scalar('mse', loss_mse.item(), i)
             if args.loss_lpips:
-                losses_lpips.append(loss_lpips.item())
+                writer.add_scalar('lpips', loss_lpips.item(), i)
 
     _, axs = plt.subplots(1, 2)
 
-    im_output = ToPILImage()(output.squeeze(0))
-    axs[0].imshow(im)
-    axs[0].set_title('GT')
-    axs[1].imshow(im_output)
-    axs[1].set_title('Recon.')
-    path = join(args.path_history, './inversion_z.jpg')
-    plt.savefig(path)
-
-    plt.clf()
-    plt.plot(losses)
-    legends = ['Total']
-    if args.loss_mse:
-        plt.plot(losses_mse)
-        legends += ['MSE']
-    if args.loss_lpips:
-        plt.plot(losses_lpips)
-        legends += ['LPIPS']
-
-    plt.legend(legends)
-    path = join(args.path_history, './plot_loss.jpg')
-    plt.savefig(path)
-
-    # loss log
-
-    if args.loss_lpips:
-        log = "total\tmse\tlpips\n"
-        for l1, l2, l3 in zip(losses, losses_mse, losses_lpips):
-            log += "%6.4f\t%6.4f\t%6.4f\n" % (l1, l2, l3)
-    else:
-        log = "total\tmse\n"
-        for l1, l2 in zip(losses, losses_mse):
-            log += "%6.4f\t%6.4f\n" % (l1, l2)
-
-    with open(join(args.path_history, 'log_loss.txt'), 'w') as f:
-        f.write(log)
+    writer.add_image('recon', output.squeeze(0), i + 1)
 
 
 if __name__ == '__main__':
