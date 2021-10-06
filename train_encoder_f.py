@@ -34,7 +34,7 @@ def parse():
     parser.add_argument('--num_feat_layer', type=int, default=4)
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
-    parser.add_argument('--num_epoch', type=int, default=2)
+    parser.add_argument('--num_epoch', type=int, default=30)
     parser.add_argument('--interval_save', type=int, default=10)
     parser.add_argument('--size_batch', type=int, default=16)
     parser.add_argument('--truncation', type=float, default=1.0)
@@ -104,18 +104,19 @@ def main(args):
 
     # Fix valid
     # a = next(dataloader)
-    x_test, _ = next(iter(dataloader))
-    grid_init = make_grid(x_test, nrow=4)
-    print(grid_init.shape)
-    writer.add_image('GT', grid_init)
-    exit()
+    with torch.no_grad():
+        x_test, _ = next(iter(dataloader))
+        grid_init = make_grid(x_test, nrow=4)
+        writer.add_image('GT', grid_init)
+        writer.flush()
 
     # Loss
     loss_fn = nn.MSELoss()
 
+    num_iter = 0
     for epoch in range(args.num_epoch):
         for i, (x, _) in enumerate(tqdm(dataloader)):
-
+            num_iter += 1
             x = x.to(DEV)
 
             # sample z
@@ -136,8 +137,15 @@ def main(args):
             optimizer.step()
 
             if i % args.interval_save == 0:
-                # writer.add_image('recon', output.squeeze(0), i)
-                writer.add_scalar('total', loss.item(), i)
+                writer.add_scalar('total', loss.item(), num_iter)
+                with torch.no_grad():
+                    f = encoder(x_test.to(DEV), embd)
+                    output = model.forward_from(noise_vector, class_vector,
+                            args.truncation, f, args.num_feat_layer)
+                    output = output.add(1).div(2)
+                    grid = make_grid(output, nrow=4)
+                    writer.add_image('recon', grid, num_iter)
+                    writer.flush()
 
 
 if __name__ == '__main__':
