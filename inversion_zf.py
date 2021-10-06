@@ -26,7 +26,8 @@ def parse():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=1)
-
+    # 5 --> 32, 4 --> 16, ...
+    parser.add_argument('--num_feat_layer', type=int, default=5)
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
     parser.add_argument('--iter', type=int, default=10000)
@@ -36,7 +37,7 @@ def parse():
     parser.add_argument('--show', action='store_false')
 
     # I/O
-    parser.add_argument('--path_history', type=str, default='inversion_z_hist')
+    parser.add_argument('--path_history', type=str, default='inversion_zf_hist')
     parser.add_argument('--path_target', type=str, default='./real.jpg')
 
     # Loss
@@ -89,17 +90,23 @@ def main(args):
     if args.loss_lpips:
         vgg_per = VGG16Perceptual()
 
-    # Optimizer
-    optimizer = optim.Adam([noise_vector])
-
     # Loss
     losses_mse = []
     losses_lpips = []
     losses = []
 
+    with torch.no_grad():
+        f = model.forward_to(noise_vector, class_vector, args.truncation,
+                args.num_feat_layer)
+    f.requires_grad = True
+
+    # Optimizer
+    optimizer = optim.Adam([noise_vector, f])
+
     tbar = tqdm(range(args.iter))
     for i in tbar:
-        output = model(noise_vector, class_vector, args.truncation)
+        output = model.forward_from(noise_vector, class_vector, args.truncation,
+                f, args.num_feat_layer)
         output = output.add(1).div(2)
 
         # Loss
