@@ -1,1 +1,1 @@
-python -m tensorboard.main --logdir=runs
+python -m tensorboard.main --logdir=runs --samples_per_plugin images=1000

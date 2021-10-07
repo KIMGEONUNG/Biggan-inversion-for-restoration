@@ -27,7 +27,8 @@ DEV = 'cuda'
 
 def parse():
     parser = argparse.ArgumentParser()
-
+    group = parser.add_argument_group('dkdkdk')
+    group.add_argument('--kim', type=int, default=123)
     parser.add_argument('--seed', type=int, default=2)
     # 5 --> 32, 4 --> 16, ...
     parser.add_argument('--num_feat_layer', type=int, default=4)
@@ -63,22 +64,31 @@ def set_seed(seed):
     random.seed(seed)
 
 
+def make_log_name(args, name):
+    for k, v in args._get_kwargs():
+        if type(v) == int:
+            name += '+%s_%d' % (k, v)
+            continue
+        if type(v) == str:
+            name += '+%s_%s' % (k, v)
+            continue
+        if type(v) == float:
+            name += '+%s_%4.2f' % (k, v)
+            continue
+    return name
+
+
 def main(args):
     print(args)
+    log_name = make_log_name(args, 'encoder')
+    print(log_name)
+    exit()
+
     if args.seed >= 0:
         set_seed(args.seed)
 
     # Logger
-    path_log = 'runs/encoder_f'
-    if args.loss_mse:
-        path_log += '+mse%3.2f' % args.coef_mse
-    if args.loss_lpips:
-        path_log += '+lpips%3.2f' % args.coef_lpips
-    if args.opt_embd:
-        path_log += '+opt_embd'
-    if args.gray_inv:
-        path_log += '+gray_inv'
-    path_log += '+feat%02d' % args.num_feat_layer
+    path_log = 'runs/' + log_name
     writer = SummaryWriter(path_log)
     writer.add_text('config', str(args))
     print('logger name:', path_log)
