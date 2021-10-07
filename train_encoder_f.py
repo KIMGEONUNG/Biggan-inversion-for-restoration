@@ -14,7 +14,7 @@ from tqdm import tqdm
 import argparse
 from torchvision.utils import make_grid
 
-from model import VGG16Perceptual, EncoderF
+from model import VGG16Perceptual, EncoderF, EncoderFSimple
 import numpy as np
 import random
 
@@ -43,6 +43,7 @@ def parse():
     parser.add_argument('--path_dataset', type=str, default='dataset_encoder')
 
     parser.add_argument('--opt_embd', action='store_true', default=False)
+    parser.add_argument('--gray_inv', action='store_true', default=False)
 
     # Loss
     parser.add_argument('--loss_mse', action='store_true', default=True)
@@ -70,12 +71,14 @@ def main(args):
     # Logger
     path_log = 'runs/encoder_f'
     if args.loss_mse:
-        path_log += '_mse%3.2f' % args.coef_mse
+        path_log += '+mse%3.2f' % args.coef_mse
     if args.loss_lpips:
-        path_log += '_lpips%3.2f' % args.coef_lpips
+        path_log += '+lpips%3.2f' % args.coef_lpips
     if args.opt_embd:
-        path_log += '_opt-embd'
-    path_log += '_feat%02d' % args.num_feat_layer
+        path_log += '+opt_embd'
+    if args.gray_inv:
+        path_log += '+gray_inv'
+    path_log += '+feat%02d' % args.num_feat_layer
     writer = SummaryWriter(path_log)
     writer.add_text('config', str(args))
     print('logger name:', path_log)
@@ -83,10 +86,16 @@ def main(args):
     # Model
     name_model = 'biggan-deep-%s' % (args.resolution)
     model = BigGAN.from_pretrained(name_model)
+    model.eval()
     model.to(DEV)
     if args.loss_lpips:
         vgg_per = VGG16Perceptual()
-    encoder = EncoderF().to(DEV)
+
+    in_ch = 3
+    if args.gray_inv:
+        in_ch = 1
+
+    encoder = EncoderFSimple(in_ch).to(DEV)
 
     # Latents
     class_vector = one_hot_from_int([args.class_index],
@@ -123,25 +132,29 @@ def main(args):
         grid_init = make_grid(x_test, nrow=4)
         writer.add_image('GT', grid_init)
         writer.flush()
+        if args.gray_inv:
+            x_test = transforms.Grayscale()(x_test)
 
         noise_vector_test = truncated_noise_sample(truncation=args.truncation,
                 batch_size=args.size_batch)
         noise_vector_test = torch.from_numpy(noise_vector_test)
         noise_vector_test = noise_vector_test.to(DEV)
 
-
     num_iter = 0
     for epoch in range(args.num_epoch):
         for i, (x, _) in enumerate(tqdm(dataloader)):
             num_iter += 1
-            x = x.to(DEV)
+            x_ = x.to(DEV)
+
+            if args.gray_inv:
+                x_ = transforms.Grayscale()(x_)
 
             noise_vector = truncated_noise_sample(truncation=args.truncation,
                     batch_size=args.size_batch)
             noise_vector = torch.from_numpy(noise_vector)
             noise_vector = noise_vector.to(DEV)
 
-            f = encoder(x, embd)
+            f = encoder(x_)
             output = model.forward_from(noise_vector, class_vector,
                     args.truncation, f, args.num_feat_layer)
             output = output.add(1).div(2)
@@ -151,10 +164,11 @@ def main(args):
             loss_mse = torch.zeros(1)
             loss_lpips = torch.zeros(1)
             if args.loss_mse:
-                loss_mse = args.coef_mse * nn.MSELoss()(x, output)
+                loss_mse = args.coef_mse * nn.MSELoss()(x.to(DEV), output)
                 loss += loss_mse
             if args.loss_lpips:
-                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
+                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(
+                        x.to(DEV), output)
                 loss += loss_lpips
 
             optimizer.zero_grad()
@@ -166,15 +180,10 @@ def main(args):
                 writer.add_scalar('mse', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 with torch.no_grad():
-                    f = encoder(x_test.to(DEV), embd)
+                    f = encoder(x_test.to(DEV))
                     output = model.forward_from(noise_vector_test, class_vector,
                             args.truncation, f, args.num_feat_layer)
                     output = output.add(1).div(2)
-                    # print(output)
-                    # print(output.min())
-                    # print(output.max())
-                    # print(output.mean())
-                    # exit()
                     grid = make_grid(output, nrow=4)
                     writer.add_image('recon', grid, num_iter)
                     writer.flush()

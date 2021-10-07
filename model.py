@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 
-__all__ = ['VGG16Perceptual', 'EncoderF']
+__all__ = ['VGG16Perceptual', 'EncoderF', 'EncoderFSimple']
 
 
 class VGG16Perceptual():
@@ -171,11 +171,11 @@ class SimpleBlock(nn.Module):
         return x + r
 
 
-class EncoderF_Simple(nn.Module):
-    def __init__(self, nc=128, cls_ch=128, k_sz=3):
+class EncoderFSimple(nn.Module):
+    def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3):
         super().__init__()
         self.layers = []
-        self.input_conv = nn.Conv2d(3, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
+        self.input_conv = nn.Conv2d(in_ch, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
         self.block1 = SimpleBlock(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
         self.block2 = SimpleBlock(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
         self.block3 = SimpleBlock(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
