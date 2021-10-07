@@ -56,10 +56,10 @@ class EncoderF(nn.Module):
         super().__init__()
         self.layers = []
         self.input_conv = nn.Conv2d(3, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
-        self.block1 = SimpleBlock(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
-        self.block2 = SimpleBlock(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
-        self.block3 = SimpleBlock(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
-        self.block4 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+        self.block1 = SimpleBlockWithAGN(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
+        self.block2 = SimpleBlockWithAGN(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
+        self.block3 = SimpleBlockWithAGN(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
+        self.block4 = SimpleBlockWithAGN(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
 
     def forward(self, x, c):
         if len(x.shape) == 3:
@@ -73,7 +73,7 @@ class EncoderF(nn.Module):
         x = F.avg_pool2d(x, [2, 2])  # 32,  32
         x = F.relu(self.block3(x, c), True)  # 32,  32, 1024
         x = F.avg_pool2d(x, [2, 2])  # 16,  16
-        x = F.relu(self.block4(x, c), True)  # 16,  16, 1024
+        x = self.block4(x, c)  # 16,  16, 1024
         return x
 
 
@@ -122,7 +122,7 @@ class AdaptiveGroupNorm(nn.Module):
         return (gamma * x) + beta
 
 
-class SimpleBlock(nn.Module):
+class SimpleBlockWithAGN(nn.Module):
     def __init__(self, in_ch, out_ch, cls_ch, k_sz):
         super().__init__()
         self.norm1 = AdaptiveGroupNorm(in_ch, cls_ch)
@@ -146,3 +146,52 @@ class SimpleBlock(nn.Module):
             x = self.conv3(x)
         return x + r
 
+
+class SimpleBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, cls_ch, k_sz):
+        super().__init__()
+        self.norm1 = nn.BatchNorm2d(in_ch, cls_ch)
+        self.conv1 = nn.Conv2d(in_ch, out_ch // 2, k_sz, 1, 1)
+        self.norm2 = nn.BatchNorm2d(out_ch // 2, cls_ch)
+        self.conv2 = nn.Conv2d(out_ch // 2, out_ch, k_sz, 1, 1)
+        if in_ch != out_ch:
+            self.conv3 = nn.Conv2d(in_ch, out_ch, k_sz, 1, 1)
+        return
+
+    def forward(self, x):
+        r = self.norm1(x)
+        r = F.relu(r)
+        r = self.conv1(r)
+        r = self.norm2(r)
+        r = F.relu(r, True)
+        r = self.conv2(r)
+
+        if hasattr(self, 'conv3'):
+            x = self.conv3(x)
+        return x + r
+
+
+class EncoderF_Simple(nn.Module):
+    def __init__(self, nc=128, cls_ch=128, k_sz=3):
+        super().__init__()
+        self.layers = []
+        self.input_conv = nn.Conv2d(3, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
+        self.block1 = SimpleBlock(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
+        self.block2 = SimpleBlock(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
+        self.block3 = SimpleBlock(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
+        self.block4 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+
+        x = F.relu(self.input_conv(x), True)  # 256, 256, 128
+        x = F.avg_pool2d(x, [2, 2])          # 128, 128
+        x = F.relu(self.block1(x), True)  # 128, 128, 256
+        x = F.avg_pool2d(x, [2, 2])  # 64,  64
+        x = F.relu(self.block2(x), True)  # 64,  64, 512
+        x = F.avg_pool2d(x, [2, 2])  # 32,  32
+        x = F.relu(self.block3(x), True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [2, 2])  # 16,  16
+        x = self.block4(x)  # 16, 1024
+        return x

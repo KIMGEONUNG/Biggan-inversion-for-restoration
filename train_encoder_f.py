@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import ToPILImage, ToTensor
 import torchvision.transforms as transforms
@@ -10,8 +11,6 @@ from pytorch_pretrained_biggan import (BigGAN, one_hot_from_int,
         truncated_noise_sample)
 from tqdm import tqdm
 
-import os
-import os.path
 import argparse
 from torchvision.utils import make_grid
 
@@ -29,26 +28,27 @@ DEV = 'cuda'
 def parse():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--seed', type=int, default=2)
     # 5 --> 32, 4 --> 16, ...
     parser.add_argument('--num_feat_layer', type=int, default=4)
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
     parser.add_argument('--num_epoch', type=int, default=30)
-    parser.add_argument('--interval_save', type=int, default=10)
+    parser.add_argument('--interval_save', type=int, default=3)
     parser.add_argument('--size_batch', type=int, default=16)
     parser.add_argument('--truncation', type=float, default=1.0)
     parser.add_argument('--show', action='store_false')
 
     # I/O
-    parser.add_argument('--path_history', type=str, default='inversion_zf_hist')
     parser.add_argument('--path_dataset', type=str, default='dataset_encoder')
+
+    parser.add_argument('--opt_embd', action='store_true', default=False)
 
     # Loss
     parser.add_argument('--loss_mse', action='store_true', default=True)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--coef_mse', type=float, default=1.0)
-    parser.add_argument('--coef_lpips', type=float, default=0.1)
+    parser.add_argument('--coef_lpips', type=float, default=0.05)
     return parser.parse_args()
 
 
@@ -64,16 +64,21 @@ def set_seed(seed):
 
 def main(args):
     print(args)
-    if not os.path.exists(args.path_history):
-        os.mkdir(args.path_history)
-
     if args.seed >= 0:
         set_seed(args.seed)
 
-    x = torch.randn(1, 3, 256, 256).to(DEV)
     # Logger
-    writer = SummaryWriter('runs/encoder_f_lpips_feat%02d' % args.num_feat_layer)
+    path_log = 'runs/encoder_f'
+    if args.loss_mse:
+        path_log += '_mse%3.2f' % args.coef_mse
+    if args.loss_lpips:
+        path_log += '_lpips%3.2f' % args.coef_lpips
+    if args.opt_embd:
+        path_log += '_opt-embd'
+    path_log += '_feat%02d' % args.num_feat_layer
+    writer = SummaryWriter(path_log)
     writer.add_text('config', str(args))
+    print('logger name:', path_log)
 
     # Model
     name_model = 'biggan-deep-%s' % (args.resolution)
@@ -88,11 +93,19 @@ def main(args):
             batch_size=args.size_batch)
     class_vector = torch.from_numpy(class_vector)
     class_vector = class_vector.to(DEV)
-    with torch.no_grad():
-        embd = model.embeddings(class_vector)
+
+    opt_target = []
+    opt_target += list(encoder.parameters())
+
+    if args.opt_embd:
+        embd = Variable(model.embeddings(class_vector), requires_grad=True)
+        opt_target += [embd]
+    else:
+        with torch.no_grad():
+            embd = model.embeddings(class_vector)
 
     # Optimizer
-    optimizer = optim.Adam(encoder.parameters())
+    optimizer = optim.Adam(opt_target)
 
     # Datasets
     prep = transforms.Compose([
@@ -105,12 +118,17 @@ def main(args):
             num_workers=8, drop_last=True)
 
     # Fix valid
-    # a = next(dataloader)
     with torch.no_grad():
         x_test, _ = next(iter(dataloader))
         grid_init = make_grid(x_test, nrow=4)
         writer.add_image('GT', grid_init)
         writer.flush()
+
+        noise_vector_test = truncated_noise_sample(truncation=args.truncation,
+                batch_size=args.size_batch)
+        noise_vector_test = torch.from_numpy(noise_vector_test)
+        noise_vector_test = noise_vector_test.to(DEV)
+
 
     num_iter = 0
     for epoch in range(args.num_epoch):
@@ -118,7 +136,6 @@ def main(args):
             num_iter += 1
             x = x.to(DEV)
 
-            # sample z
             noise_vector = truncated_noise_sample(truncation=args.truncation,
                     batch_size=args.size_batch)
             noise_vector = torch.from_numpy(noise_vector)
@@ -131,6 +148,8 @@ def main(args):
 
             # Loss
             loss = 0
+            loss_mse = torch.zeros(1)
+            loss_lpips = torch.zeros(1)
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x, output)
                 loss += loss_mse
@@ -148,9 +167,14 @@ def main(args):
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV), embd)
-                    output = model.forward_from(noise_vector, class_vector,
+                    output = model.forward_from(noise_vector_test, class_vector,
                             args.truncation, f, args.num_feat_layer)
                     output = output.add(1).div(2)
+                    # print(output)
+                    # print(output.min())
+                    # print(output.max())
+                    # print(output.mean())
+                    # exit()
                     grid = make_grid(output, nrow=4)
                     writer.add_image('recon', grid, num_iter)
                     writer.flush()
