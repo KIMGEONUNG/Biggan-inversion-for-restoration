@@ -46,7 +46,9 @@ def parse():
 
     # Loss
     parser.add_argument('--loss_mse', action='store_true', default=True)
-    parser.add_argument('--loss_lpips', action='store_true', default=False)
+    parser.add_argument('--loss_lpips', action='store_true', default=True)
+    parser.add_argument('--coef_mse', type=float, default=1.0)
+    parser.add_argument('--coef_lpips', type=float, default=0.1)
     return parser.parse_args()
 
 
@@ -62,7 +64,6 @@ def set_seed(seed):
 
 def main(args):
     print(args)
-
     if not os.path.exists(args.path_history):
         os.mkdir(args.path_history)
 
@@ -71,7 +72,8 @@ def main(args):
 
     x = torch.randn(1, 3, 256, 256).to(DEV)
     # Logger
-    writer = SummaryWriter('runs/encoder_f_feat%02d' % args.num_feat_layer)
+    writer = SummaryWriter('runs/encoder_f_lpips_feat%02d' % args.num_feat_layer)
+    writer.add_text('config', str(args))
 
     # Model
     name_model = 'biggan-deep-%s' % (args.resolution)
@@ -110,9 +112,6 @@ def main(args):
         writer.add_image('GT', grid_init)
         writer.flush()
 
-    # Loss
-    loss_fn = nn.MSELoss()
-
     num_iter = 0
     for epoch in range(args.num_epoch):
         for i, (x, _) in enumerate(tqdm(dataloader)):
@@ -130,7 +129,14 @@ def main(args):
                     args.truncation, f, args.num_feat_layer)
             output = output.add(1).div(2)
 
-            loss = loss_fn(x, output)
+            # Loss
+            loss = 0
+            if args.loss_mse:
+                loss_mse = args.coef_mse * nn.MSELoss()(x, output)
+                loss += loss_mse
+            if args.loss_lpips:
+                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
+                loss += loss_lpips
 
             optimizer.zero_grad()
             loss.backward()
@@ -138,6 +144,8 @@ def main(args):
 
             if i % args.interval_save == 0:
                 writer.add_scalar('total', loss.item(), num_iter)
+                writer.add_scalar('mse', loss_mse.item(), num_iter)
+                writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV), embd)
                     output = model.forward_from(noise_vector, class_vector,
