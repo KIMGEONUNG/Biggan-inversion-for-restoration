@@ -27,8 +27,6 @@ DEV = 'cuda'
 
 def parse():
     parser = argparse.ArgumentParser()
-    group = parser.add_argument_group('dkdkdk')
-    group.add_argument('--kim', type=int, default=123)
     parser.add_argument('--seed', type=int, default=2)
     # 5 --> 32, 4 --> 16, ...
     parser.add_argument('--num_feat_layer', type=int, default=4)
@@ -42,15 +40,17 @@ def parse():
 
     # I/O
     parser.add_argument('--path_dataset', type=str, default='dataset_encoder')
-
     parser.add_argument('--opt_embd', action='store_true', default=False)
-    parser.add_argument('--gray_inv', action='store_true', default=False)
+
+    parser.add_argument('--gray_inv', action='store_true', default=True)
 
     # Loss
-    parser.add_argument('--loss_mse', action='store_true', default=True)
-    parser.add_argument('--loss_lpips', action='store_true', default=True)
+    parser.add_argument('--loss_mse', action='store_true', default=False)
+    parser.add_argument('--loss_lpips', action='store_true', default=False)
+    parser.add_argument('--loss_hsv', action='store_true', default=True)
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
+    parser.add_argument('--coef_hsv', type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -64,25 +64,91 @@ def set_seed(seed):
     random.seed(seed)
 
 
-def make_log_name(args, name):
+def conversion(fn, x):
+    if len(x.shape) == 4:
+        x = x.permute(0, 2, 3, 1)
+    else:
+        x = x.permute(1, 2, 0)
+
+    x = fn(x)
+
+    if len(x.shape) == 4:
+        x = x.permute(0, 3, 1, 2)
+    else:
+        x = x.permute(2, 0, 1)
+    return x
+
+
+def rgb2hsv_torch(rgb):
+    # float and aleady normalized 
+
+    arr = rgb
+    out = torch.zeros_like(rgb)
+
+    # -- V channel
+    out_v, _ = arr.max(-1)
+
+    # -- S channel
+    delta = arr.max(-1).values - arr.min(-1).values
+
+    out_s = delta / out_v
+    out_s[delta == 0.] = 0.
+
+    # -- H channel
+    # red is max
+    idx = (arr[..., 0] == out_v)
+    out[..., 0][idx] = (arr[..., 1][idx] - arr[..., 2][idx]) / delta[idx]
+
+    # green is max
+    idx = (arr[..., 1] == out_v)
+    out[..., 0][idx] = 2. + (arr[..., 2][idx] - arr[..., 0][idx]) / delta[idx]
+
+    # blue is max
+    idx = (arr[..., 2] == out_v)
+    out[..., 0][idx] = 4. + (arr[..., 0][idx] - arr[..., 1][idx]) / delta[idx]
+    out_h = (out[..., 0] / 6.) % 1.
+    out_h[delta == 0.] = 0.
+
+    out[..., 0] = out_h
+    out[..., 1] = out_s
+    out[..., 2] = out_v
+
+    # # remove NaN
+    out[torch.isnan(out)] = 0
+
+    return out
+
+
+def hsv_loss(x1, x2):
+    x1_hsv = conversion(rgb2hsv_torch, x1)
+    x2_hsv = conversion(rgb2hsv_torch, x2)
+    return nn.MSELoss()(x1_hsv, x2_hsv)
+
+
+def make_log_name(args, name, targets):
     for k, v in args._get_kwargs():
+        if k not in targets:
+            continue
         if type(v) == int:
-            name += '+%s_%d' % (k, v)
+            name += '+%s:%d' % (k, v)
             continue
         if type(v) == str:
-            name += '+%s_%s' % (k, v)
+            name += '+%s:%s' % (k, v)
             continue
         if type(v) == float:
-            name += '+%s_%4.2f' % (k, v)
+            name += '+%s:%4.2f' % (k, v)
+            continue
+        if type(v) == bool:
+            name += '+%s:%s' % (k, str(v))
             continue
     return name
 
 
 def main(args):
     print(args)
-    log_name = make_log_name(args, 'encoder')
-    print(log_name)
-    exit()
+    targets = [ 'loss_mse', 'loss_lpips', 'loss_hsv', 'coef_mse',
+            'coef_lpips', 'coef_hsv', 'gray_inv']
+    log_name = make_log_name(args, 'encoder', targets)
 
     if args.seed >= 0:
         set_seed(args.seed)
@@ -173,6 +239,7 @@ def main(args):
             loss = 0
             loss_mse = torch.zeros(1)
             loss_lpips = torch.zeros(1)
+            loss_hsv = torch.zeros(1)
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x.to(DEV), output)
                 loss += loss_mse
@@ -180,6 +247,9 @@ def main(args):
                 loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(
                         x.to(DEV), output)
                 loss += loss_lpips
+            if args.loss_hsv:
+                loss_hsv = args.coef_hsv * hsv_loss(x.to(DEV), output)
+                loss += loss_hsv
 
             optimizer.zero_grad()
             loss.backward()
@@ -189,6 +259,7 @@ def main(args):
                 writer.add_scalar('total', loss.item(), num_iter)
                 writer.add_scalar('mse', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
+                writer.add_scalar('hsv', loss_hsv.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV))
                     output = model.forward_from(noise_vector_test, class_vector,
