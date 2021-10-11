@@ -151,8 +151,9 @@ def make_log_name(args, name, targets):
 
 def main(args):
     print(args)
-    targets = [ 'loss_mse', 'loss_lpips', 'loss_hsv', 'coef_mse',
-            'coef_lpips', 'coef_hsv', 'gray_inv']
+    targets = [ 'loss_mse', 'loss_lpips', 'loss_hsv', 'loss_d',
+            'coef_mse', 'coef_lpips', 'coef_hsv', 'coef_d'
+            'gray_inv']
     log_name = make_log_name(args, 'encoder', targets)
 
     if args.seed >= 0:
@@ -179,7 +180,8 @@ def main(args):
             config = pickle.load(f)
         discriminator = Discriminator(**config)
         discriminator.load_state_dict(
-            torch.load(args.path_ckpt_D)).to(DEV)
+            torch.load(args.path_ckpt_D))
+        discriminator.to(DEV)
 
     in_ch = 3
     if args.gray_inv:
@@ -262,8 +264,12 @@ def main(args):
                 loss_hsv = args.coef_hsv * hsv_loss(x.to(DEV), output)
                 loss += loss_hsv
             if args.loss_d:
-                loss_d = discriminator(output).mean().log()
-                loss_d = args.coef_d * d_loss(x.to(DEV), output)
+                print(discriminator(output, class_vector.type(torch.IntTensor))[0])
+                exit()
+                loss_d = torch.log(
+                        discriminator(output)[0].clip(0, 1).mean())
+                        # 1 - discriminator(output)[0].clip(0, 1).mean())
+                loss_d = args.coef_d * loss_d
                 loss += loss_d
 
             optimizer.zero_grad()
