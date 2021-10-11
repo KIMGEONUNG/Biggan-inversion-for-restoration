@@ -14,7 +14,7 @@ from tqdm import tqdm
 import argparse
 from torchvision.utils import make_grid
 
-from model import VGG16Perceptual, EncoderF, EncoderFSimple
+from model import VGG16Perceptual, EncoderF, EncoderFSimple, DCGAN_D 
 import numpy as np
 import random
 
@@ -55,7 +55,7 @@ def parse():
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
-    parser.add_argument('--coef_d', type=float, default=1.0)
+    parser.add_argument('--coef_d', type=float, default=0.2)
     return parser.parse_args()
 
 
@@ -264,11 +264,11 @@ def main(args):
                 loss_hsv = args.coef_hsv * hsv_loss(x.to(DEV), output)
                 loss += loss_hsv
             if args.loss_d:
-                print(discriminator(output, class_vector.type(torch.IntTensor))[0])
-                exit()
-                loss_d = torch.log(
-                        discriminator(output)[0].clip(0, 1).mean())
-                        # 1 - discriminator(output)[0].clip(0, 1).mean())
+                loss_d = discriminator(output,
+                        class_vector.argmax(dim=-1))[0]\
+                                .mul(-1)\
+                                .log()\
+                                .mean()
                 loss_d = args.coef_d * loss_d
                 loss += loss_d
 

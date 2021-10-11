@@ -3,8 +3,38 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 
-__all__ = ['VGG16Perceptual', 'EncoderF', 'EncoderFSimple']
+__all__ = ['VGG16Perceptual', 'EncoderF', 'EncoderFSimple', 'DCGAN_D']
 
+
+class DCGAN_D(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        def discriminator_block(in_filters, out_filters, bn=True):
+            block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1), nn.LeakyReLU(0.2, inplace=True), nn.Dropout2d(0.25)]
+            if bn:
+                block.append(nn.BatchNorm2d(out_filters, 0.8))
+            return block
+
+        self.model = nn.Sequential(
+            *discriminator_block(3, 16, bn=False), # 128 x 128
+            *discriminator_block(16, 32), # 64 x 64
+            *discriminator_block(32, 64), # 32 x 32
+            *discriminator_block(64, 128), # 16 x 16
+            *discriminator_block(128, 256), # 8 x 8 
+            *discriminator_block(256, 512), # 4 x 4 
+        )
+
+        # The height and width of downsampled image
+        ds_size = 4 
+        self.adv_layer = nn.Sequential(nn.Linear(512 * ds_size ** 2, 1), nn.Sigmoid())
+
+    def forward(self, img):
+        out = self.model(img)
+        out = out.view(out.shape[0], -1)
+        validity = self.adv_layer(out)
+
+        return validity
 
 class VGG16Perceptual():
 
