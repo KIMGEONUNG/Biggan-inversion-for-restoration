@@ -40,17 +40,22 @@ def parse():
 
     # I/O
     parser.add_argument('--path_dataset', type=str, default='dataset_encoder')
-    parser.add_argument('--opt_embd', action='store_true', default=False)
+    parser.add_argument('--path_config', type=str, default='./checkpoints/config.pickle')
+    parser.add_argument('--path_ckpt_D', type=str, default='./checkpoints/D_256.pth')
 
+    # Conversion
     parser.add_argument('--gray_inv', action='store_true', default=True)
 
     # Loss
-    parser.add_argument('--loss_mse', action='store_true', default=False)
-    parser.add_argument('--loss_lpips', action='store_true', default=False)
+    parser.add_argument('--loss_mse', action='store_true', default=True)
+    parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
+    parser.add_argument('--loss_d', action='store_true', default=True)
+    # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
+    parser.add_argument('--coef_d', type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -161,11 +166,20 @@ def main(args):
 
     # Model
     name_model = 'biggan-deep-%s' % (args.resolution)
-    model = BigGAN.from_pretrained(name_model)
-    model.eval()
-    model.to(DEV)
+    generator = BigGAN.from_pretrained(name_model)
+    generator.eval()
+    generator.to(DEV)
     if args.loss_lpips:
         vgg_per = VGG16Perceptual()
+
+    if args.loss_d:
+        import pickle
+        from models_dgp import Generator, Discriminator
+        with open(args.path_config, 'rb') as f:
+            config = pickle.load(f)
+        discriminator = Discriminator(**config)
+        discriminator.load_state_dict(
+            torch.load(args.path_ckpt_D)).to(DEV)
 
     in_ch = 3
     if args.gray_inv:
@@ -182,12 +196,8 @@ def main(args):
     opt_target = []
     opt_target += list(encoder.parameters())
 
-    if args.opt_embd:
-        embd = Variable(model.embeddings(class_vector), requires_grad=True)
-        opt_target += [embd]
-    else:
-        with torch.no_grad():
-            embd = model.embeddings(class_vector)
+    with torch.no_grad():
+        embd = generator.embeddings(class_vector)
 
     # Optimizer
     optimizer = optim.Adam(opt_target)
@@ -231,7 +241,7 @@ def main(args):
             noise_vector = noise_vector.to(DEV)
 
             f = encoder(x_)
-            output = model.forward_from(noise_vector, class_vector,
+            output = generator.forward_from(noise_vector, class_vector,
                     args.truncation, f, args.num_feat_layer)
             output = output.add(1).div(2)
 
@@ -240,6 +250,7 @@ def main(args):
             loss_mse = torch.zeros(1)
             loss_lpips = torch.zeros(1)
             loss_hsv = torch.zeros(1)
+            loss_d = torch.zeros(1)
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x.to(DEV), output)
                 loss += loss_mse
@@ -250,6 +261,10 @@ def main(args):
             if args.loss_hsv:
                 loss_hsv = args.coef_hsv * hsv_loss(x.to(DEV), output)
                 loss += loss_hsv
+            if args.loss_d:
+                loss_d = discriminator(output).mean().log()
+                loss_d = args.coef_d * d_loss(x.to(DEV), output)
+                loss += loss_d
 
             optimizer.zero_grad()
             loss.backward()
@@ -260,9 +275,10 @@ def main(args):
                 writer.add_scalar('mse', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 writer.add_scalar('hsv', loss_hsv.item(), num_iter)
+                writer.add_scalar('d', loss_hsv.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV))
-                    output = model.forward_from(noise_vector_test, class_vector,
+                    output = generator.forward_from(noise_vector_test, class_vector,
                             args.truncation, f, args.num_feat_layer)
                     output = output.add(1).div(2)
                     grid = make_grid(output, nrow=4)
