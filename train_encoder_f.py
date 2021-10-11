@@ -50,7 +50,7 @@ def parse():
     parser.add_argument('--loss_mse', action='store_true', default=True)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
-    parser.add_argument('--loss_d', action='store_true', default=True)
+    parser.add_argument('--loss_d', action='store_true', default=False)
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
@@ -281,7 +281,7 @@ def main(args):
                 writer.add_scalar('mse', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 writer.add_scalar('hsv', loss_hsv.item(), num_iter)
-                writer.add_scalar('d', loss_hsv.item(), num_iter)
+                writer.add_scalar('d', loss_d.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV))
                     output = generator.forward_from(noise_vector_test, class_vector,
