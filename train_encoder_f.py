@@ -34,9 +34,13 @@ def parse():
     parser.add_argument('--class_index', type=int, default=15)
     parser.add_argument('--num_epoch', type=int, default=30)
     parser.add_argument('--interval_save', type=int, default=3)
-    parser.add_argument('--size_batch', type=int, default=16)
+    parser.add_argument('--size_batch', type=int, default=8)
     parser.add_argument('--truncation', type=float, default=1.0)
     parser.add_argument('--show', action='store_false')
+
+    parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
+    parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
+    parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 
     # I/O
     parser.add_argument('--path_dataset', type=str, default='dataset_encoder')
@@ -47,15 +51,14 @@ def parse():
     parser.add_argument('--gray_inv', action='store_true', default=True)
 
     # Loss
-    parser.add_argument('--loss_mse', action='store_true', default=True)
+    parser.add_argument('--loss_mse', action='store_true', default=False)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
-    parser.add_argument('--loss_d', action='store_true', default=False)
+    parser.add_argument('--loss_adv', action='store_true', default=True)
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
-    parser.add_argument('--coef_d', type=float, default=0.2)
     return parser.parse_args()
 
 
@@ -151,9 +154,8 @@ def make_log_name(args, name, targets):
 
 def main(args):
     print(args)
-    targets = [ 'loss_mse', 'loss_lpips', 'loss_hsv', 'loss_d',
-            'coef_mse', 'coef_lpips', 'coef_hsv', 'coef_d'
-            'gray_inv']
+    targets = ['loss_mse', 'loss_lpips', 'loss_hsv', 'loss_adv',
+            'coef_mse', 'coef_lpips', 'coef_hsv', 'gray_inv']
     log_name = make_log_name(args, 'encoder', targets)
 
     if args.seed >= 0:
@@ -172,16 +174,11 @@ def main(args):
     generator.to(DEV)
     if args.loss_lpips:
         vgg_per = VGG16Perceptual()
-
-    if args.loss_d:
-        import pickle
-        from models_dgp import Generator, Discriminator
-        with open(args.path_config, 'rb') as f:
-            config = pickle.load(f)
-        discriminator = Discriminator(**config)
-        discriminator.load_state_dict(
-            torch.load(args.path_ckpt_D))
+    if args.loss_adv:
+        discriminator = DCGAN_D()
         discriminator.to(DEV)
+        optimizer_d = optim.Adam(discriminator.parameters(),
+                lr=args.lr, betas=(args.b1, args.b2))
 
     in_ch = 3
     if args.gray_inv:
@@ -202,7 +199,7 @@ def main(args):
         embd = generator.embeddings(class_vector)
 
     # Optimizer
-    optimizer = optim.Adam(opt_target)
+    optimizer = optim.Adam(opt_target, lr=args.lr, betas=(args.b1, args.b2))
 
     # Datasets
     prep = transforms.Compose([
@@ -232,6 +229,7 @@ def main(args):
     for epoch in range(args.num_epoch):
         for i, (x, _) in enumerate(tqdm(dataloader)):
             num_iter += 1
+            x = x.to(DEV)
             x_ = x.to(DEV)
 
             if args.gray_inv:
@@ -252,36 +250,46 @@ def main(args):
             loss_mse = torch.zeros(1)
             loss_lpips = torch.zeros(1)
             loss_hsv = torch.zeros(1)
+            loss_adv = torch.zeros(1)
+            loss_g = torch.zeros(1)
             loss_d = torch.zeros(1)
             if args.loss_mse:
-                loss_mse = args.coef_mse * nn.MSELoss()(x.to(DEV), output)
+                loss_mse = args.coef_mse * nn.MSELoss()(x, output)
                 loss += loss_mse
             if args.loss_lpips:
                 loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(
                         x.to(DEV), output)
                 loss += loss_lpips
             if args.loss_hsv:
-                loss_hsv = args.coef_hsv * hsv_loss(x.to(DEV), output)
+                loss_hsv = args.coef_hsv * hsv_loss(x, output)
                 loss += loss_hsv
-            if args.loss_d:
-                loss_d = discriminator(output,
-                        class_vector.argmax(dim=-1))[0]\
-                                .mul(-1)\
-                                .log()\
-                                .mean()
-                loss_d = args.coef_d * loss_d
-                loss += loss_d
+            if args.loss_adv:
+                loss_g = (1 - discriminator(output)).log().mean()
+                loss += loss_g
 
+            # ---------------------
+            #  Train Discriminator
+            # ---------------------
             optimizer.zero_grad()
-            loss.backward()
+            loss.backward(retain_graph=True)
             optimizer.step()
+
+            if args.loss_adv:
+                real_loss = (1 - discriminator(x.detach())).log().mean()
+                fake_loss = discriminator(output.detach()).log().mean()
+                loss_d = (real_loss + fake_loss) / 2
+
+                optimizer_d.zero_grad()
+                loss_d.backward()
+                optimizer_d.step()
 
             if i % args.interval_save == 0:
                 writer.add_scalar('total', loss.item(), num_iter)
                 writer.add_scalar('mse', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 writer.add_scalar('hsv', loss_hsv.item(), num_iter)
-                writer.add_scalar('d', loss_d.item(), num_iter)
+                writer.add_scalar('gen', loss_g.item(), num_iter)
+                writer.add_scalar('dis', loss_d.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV))
                     output = generator.forward_from(noise_vector_test, class_vector,
