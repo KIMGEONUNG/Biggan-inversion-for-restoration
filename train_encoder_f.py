@@ -255,6 +255,7 @@ def main(args):
             loss_adv = torch.zeros(1)
             loss_g = torch.zeros(1)
             loss_d = torch.zeros(1)
+
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x, output)
                 loss += loss_mse
@@ -264,18 +265,33 @@ def main(args):
             if args.loss_lpips:
                 loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
                 loss += loss_lpips
+
             if args.loss_adv:
-                loss_g = (1 - discriminator(output)).log().mean()
+                bce_fn = nn.BCELoss()
+                real_label = 1.
+                fake_label = 0.
+
+                label = torch.full((args.bach_size,), real_label, 
+                        dtype=torch.float).to(DEV)
+                loss_g = bce_fn(discriminator(output.detach()), label)
+                loss_g = args.coef_gen * loss_g
                 loss += loss_g
 
             optimizer_g.zero_grad()
             loss.backward(retain_graph=True)
             optimizer_g.step()
-
+            
+            # discriminator
             if args.loss_adv:
-                real_loss = (1 - discriminator(x.detach())).log().mean()
-                fake_loss = discriminator(output.detach()).log().mean()
-                loss_d = (real_loss + fake_loss) / 2
+                label = torch.full((args.bach_size,), real_label, 
+                        dtype=torch.float).to(DEV)
+                real_loss = bce_fn(discriminator(x.detach()), label)
+
+                label = torch.full((args.bach_size,), fake_label, 
+                        dtype=torch.float).to(DEV)
+                fake_loss = bce_fn(discriminator(output.detach()), label)
+
+                loss_d = real_loss + fake_loss
 
                 optimizer_d.zero_grad()
                 loss_d.backward()
