@@ -271,7 +271,7 @@ def main(args):
                 real_label = 1.
                 fake_label = 0.
 
-                label = torch.full((args.bach_size,), real_label, 
+                label = torch.full((args.size_batch,), real_label, 
                         dtype=torch.float).to(DEV)
                 loss_g = bce_fn(discriminator(output.detach()), label)
                 loss_g = args.coef_gen * loss_g
@@ -283,11 +283,11 @@ def main(args):
             
             # discriminator
             if args.loss_adv:
-                label = torch.full((args.bach_size,), real_label, 
+                label = torch.full((args.size_batch,), real_label, 
                         dtype=torch.float).to(DEV)
                 real_loss = bce_fn(discriminator(x.detach()), label)
 
-                label = torch.full((args.bach_size,), fake_label, 
+                label = torch.full((args.size_batch,), fake_label, 
                         dtype=torch.float).to(DEV)
                 fake_loss = bce_fn(discriminator(output.detach()), label)
 
