@@ -301,12 +301,12 @@ def main(args):
                 optimizer_d.step()
 
             if i % args.interval_save == 0:
-                writer.add_scalar('total', loss.item(), num_iter)
-                writer.add_scalar('mse', loss_mse.item(), num_iter)
+                writer.add_scalar('total_g', loss.item(), num_iter)
+                writer.add_scalar('mse_rgb', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
-                writer.add_scalar('hsv', loss_hsv.item(), num_iter)
-                writer.add_scalar('gen', loss_g.item(), num_iter)
-                writer.add_scalar('dis', loss_d.item(), num_iter)
+                writer.add_scalar('mse_hsv', loss_hsv.item(), num_iter)
+                writer.add_scalar('generator', loss_g.item(), num_iter)
+                writer.add_scalar('discriminator', loss_d.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV))
                     output = generator.forward_from(noise_vector_test, class_vector,
