@@ -273,7 +273,8 @@ def main(args):
 
                 label = torch.full((args.size_batch,), real_label, 
                         dtype=torch.float).to(DEV)
-                loss_g = bce_fn(discriminator(output.detach()), label)
+                prop = discriminator(output.detach()).view(-1)
+                loss_g = bce_fn(prop, label)
                 loss_g = args.coef_gen * loss_g
                 loss += loss_g
 
@@ -285,11 +286,13 @@ def main(args):
             if args.loss_adv:
                 label = torch.full((args.size_batch,), real_label, 
                         dtype=torch.float).to(DEV)
-                real_loss = bce_fn(discriminator(x.detach()), label)
+                prop = discriminator(x.detach()).view(-1)
+                real_loss = bce_fn(prop, label)
 
                 label = torch.full((args.size_batch,), fake_label, 
                         dtype=torch.float).to(DEV)
-                fake_loss = bce_fn(discriminator(output.detach()), label)
+                prop = discriminator(output.detach()).view(-1)
+                fake_loss = bce_fn(prop, label)
 
                 loss_d = real_loss + fake_loss
 
