@@ -54,7 +54,7 @@ def parse():
     parser.add_argument('--loss_mse', action='store_true', default=False)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
-    parser.add_argument('--loss_adv', action='store_true', default=True)
+    parser.add_argument('--loss_adv', action='store_true', default=False)
 
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
@@ -62,6 +62,24 @@ def parse():
     parser.add_argument('--coef_gen', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
     return parser.parse_args()
+
+
+class ColorFourierFeature(nn.Module):
+
+    def __init__(self, dim_in=3, dim_out=64):
+        super().__init__()
+
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+        # self.transform = nn.Linear(dim_in, dim_out // 2, bias=False)
+        self.transform = nn.Conv2d(dim_in, dim_out // 2,
+                kernel_size=1,
+                bias=False)
+
+    def forward(self, x):
+        x = self.transform(x)
+        x = torch.cat([x.sin(), x.cos()], dim=-3)
+        return x
 
 
 def set_seed(seed):
@@ -255,6 +273,9 @@ def main(args):
             loss_adv = torch.zeros(1)
             loss_g = torch.zeros(1)
             loss_d = torch.zeros(1)
+            prob_g = torch.zeros(1)
+            prob_d_real = torch.zeros(1)
+            prob_d_fake = torch.zeros(1)
 
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x, output)
@@ -267,38 +288,38 @@ def main(args):
                 loss += loss_lpips
 
             if args.loss_adv:
+                # discriminator
                 bce_fn = nn.BCELoss()
                 real_label = 1.
                 fake_label = 0.
 
                 label = torch.full((args.size_batch,), real_label, 
                         dtype=torch.float).to(DEV)
-                prop = discriminator(output.detach()).view(-1)
-                loss_g = bce_fn(prop, label)
-                loss_g = args.coef_gen * loss_g
-                loss += loss_g
-
-            optimizer_g.zero_grad()
-            loss.backward(retain_graph=True)
-            optimizer_g.step()
-            
-            # discriminator
-            if args.loss_adv:
-                label = torch.full((args.size_batch,), real_label, 
-                        dtype=torch.float).to(DEV)
-                prop = discriminator(x.detach()).view(-1)
-                real_loss = bce_fn(prop, label)
+                prob_d_real = discriminator(x.detach()).view(-1)
+                real_loss = bce_fn(prob_d_real, label)
 
                 label = torch.full((args.size_batch,), fake_label, 
                         dtype=torch.float).to(DEV)
-                prop = discriminator(output.detach()).view(-1)
-                fake_loss = bce_fn(prop, label)
+                prob_d_fake = discriminator(output.detach()).view(-1)
+                fake_loss = bce_fn(prob_d_fake, label)
 
                 loss_d = real_loss + fake_loss
 
                 optimizer_d.zero_grad()
                 loss_d.backward()
                 optimizer_d.step()
+
+                # generator 
+                label = torch.full((args.size_batch,), real_label, 
+                        dtype=torch.float).to(DEV)
+                prob_g = discriminator(output.detach()).view(-1)
+                loss_g = bce_fn(prob_g, label)
+                loss_g = args.coef_gen * loss_g
+                loss += loss_g
+
+            optimizer_g.zero_grad()
+            loss.backward()
+            optimizer_g.step()
 
             if i % args.interval_save == 0:
                 writer.add_scalar('total_g', loss.item(), num_iter)
@@ -307,6 +328,9 @@ def main(args):
                 writer.add_scalar('mse_hsv', loss_hsv.item(), num_iter)
                 writer.add_scalar('generator', loss_g.item(), num_iter)
                 writer.add_scalar('discriminator', loss_d.item(), num_iter)
+                writer.add_scalar('prob_g', prob_g.mean().item(), num_iter)
+                writer.add_scalar('prob_d_real', prob_d_real.mean().item(), num_iter)
+                writer.add_scalar('prob_d_fake', prob_d_fake.mean().item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV))
                     output = generator.forward_from(noise_vector_test, class_vector,
