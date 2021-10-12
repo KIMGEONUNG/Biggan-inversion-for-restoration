@@ -55,9 +55,11 @@ def parse():
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
     parser.add_argument('--loss_adv', action='store_true', default=True)
+
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
+    parser.add_argument('--coef_gen', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
     return parser.parse_args()
 
@@ -199,7 +201,7 @@ def main(args):
         embd = generator.embeddings(class_vector)
 
     # Optimizer
-    optimizer = optim.Adam(opt_target, lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_g = optim.Adam(opt_target, lr=args.lr, betas=(args.b1, args.b2))
 
     # Datasets
     prep = transforms.Compose([
@@ -256,23 +258,19 @@ def main(args):
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x, output)
                 loss += loss_mse
-            if args.loss_lpips:
-                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(
-                        x.to(DEV), output)
-                loss += loss_lpips
             if args.loss_hsv:
                 loss_hsv = args.coef_hsv * hsv_loss(x, output)
                 loss += loss_hsv
+            if args.loss_lpips:
+                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
+                loss += loss_lpips
             if args.loss_adv:
                 loss_g = (1 - discriminator(output)).log().mean()
                 loss += loss_g
 
-            # ---------------------
-            #  Train Discriminator
-            # ---------------------
-            optimizer.zero_grad()
+            optimizer_g.zero_grad()
             loss.backward(retain_graph=True)
-            optimizer.step()
+            optimizer_g.step()
 
             if args.loss_adv:
                 real_loss = (1 - discriminator(x.detach())).log().mean()
