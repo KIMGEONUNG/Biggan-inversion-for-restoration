@@ -158,7 +158,7 @@ def main(args):
     print(args)
     targets = ['loss_mse', 'loss_lpips', 'loss_hsv', 'loss_adv',
             'coef_mse', 'coef_lpips', 'coef_hsv', 'gray_inv']
-    log_name = make_log_name(args, 'encoder', targets)
+    log_name = make_log_name(args, 'encoder_f', targets)
 
     if args.seed >= 0:
         set_seed(args.seed)
