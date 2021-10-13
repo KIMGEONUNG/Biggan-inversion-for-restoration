@@ -14,7 +14,7 @@ from tqdm import tqdm
 import argparse
 from torchvision.utils import make_grid
 
-from model import VGG16Perceptual, EncoderF, EncoderFSimple, DCGAN_D 
+from model import VGG16Perceptual, EncoderF, EncoderF, DCGAN_D 
 import numpy as np
 import random
 
@@ -54,32 +54,12 @@ def parse():
     parser.add_argument('--loss_mse', action='store_true', default=False)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
-    parser.add_argument('--loss_adv', action='store_true', default=False)
-
+    parser.add_argument('--loss_adv', action='store_true', default=True)
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
-    parser.add_argument('--coef_gen', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
     return parser.parse_args()
-
-
-class ColorFourierFeature(nn.Module):
-
-    def __init__(self, dim_in=3, dim_out=64):
-        super().__init__()
-
-        self.dim_in = dim_in
-        self.dim_out = dim_out
-        # self.transform = nn.Linear(dim_in, dim_out // 2, bias=False)
-        self.transform = nn.Conv2d(dim_in, dim_out // 2,
-                kernel_size=1,
-                bias=False)
-
-    def forward(self, x):
-        x = self.transform(x)
-        x = torch.cat([x.sin(), x.cos()], dim=-3)
-        return x
 
 
 def set_seed(seed):
@@ -204,7 +184,7 @@ def main(args):
     if args.gray_inv:
         in_ch = 1
 
-    encoder = EncoderFSimple(in_ch).to(DEV)
+    encoder = EncoderF(in_ch).to(DEV)
 
     # Latents
     class_vector = one_hot_from_int([args.class_index],
@@ -219,7 +199,7 @@ def main(args):
         embd = generator.embeddings(class_vector)
 
     # Optimizer
-    optimizer_g = optim.Adam(opt_target, lr=args.lr, betas=(args.b1, args.b2))
+    optimizer = optim.Adam(opt_target, lr=args.lr, betas=(args.b1, args.b2))
 
     # Datasets
     prep = transforms.Compose([
@@ -273,26 +253,56 @@ def main(args):
             loss_adv = torch.zeros(1)
             loss_g = torch.zeros(1)
             loss_d = torch.zeros(1)
-            prob_g = torch.zeros(1)
-            prob_d_real = torch.zeros(1)
-            prob_d_fake = torch.zeros(1)
-
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x, output)
                 loss += loss_mse
+            if args.loss_lpips:
+                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(
+                        x.to(DEV), output)
+                loss += loss_lpips
             if args.loss_hsv:
                 loss_hsv = args.coef_hsv * hsv_loss(x, output)
                 loss += loss_hsv
-            if args.loss_lpips:
-                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
-                loss += loss_lpips
+            if args.loss_adv:
+                loss_g = (1 - discriminator(output)).log().mean()
+                loss += loss_g
+
+            # ---------------------
+            #  Train Discriminator
+            # ---------------------
+            optimizer.zero_grad()
+            loss.backward(retain_graph=True)
+            optimizer.step()
 
             if args.loss_adv:
-                # discriminator
-                bce_fn = nn.BCELoss()
-                real_label = 1.
-                fake_label = 0.
+                real_loss = (1 - discriminator(x.detach())).log().mean()
+                fake_loss = discriminator(output.detach()).log().mean()
+                loss_d = (real_loss + fake_loss) / 2
 
+                optimizer_d.zero_grad()
+                loss_d.backward()
+                optimizer_d.step()
+
+            if i % args.interval_save == 0:
+                writer.add_scalar('total', loss.item(), num_iter)
+                writer.add_scalar('mse', loss_mse.item(), num_iter)
+                writer.add_scalar('lpips', loss_lpips.item(), num_iter)
+                writer.add_scalar('hsv', loss_hsv.item(), num_iter)
+                writer.add_scalar('gen', loss_g.item(), num_iter)
+                writer.add_scalar('dis', loss_d.item(), num_iter)
+                with torch.no_grad():
+                    f = encoder(x_test.to(DEV))
+                    output = generator.forward_from(noise_vector_test, class_vector,
+                            args.truncation, f, args.num_feat_layer)
+                    output = output.add(1).div(2)
+                    grid = make_grid(output, nrow=4)
+                    writer.add_image('recon', grid, num_iter)
+                    writer.flush()
+
+
+if __name__ == '__main__':
+    args = parse()
+    main(args)
                 label = torch.full((args.size_batch,), real_label, 
                         dtype=torch.float).to(DEV)
                 prob_d_real = discriminator(x.detach()).view(-1)

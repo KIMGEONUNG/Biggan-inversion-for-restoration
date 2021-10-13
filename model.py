@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 
-__all__ = ['VGG16Perceptual', 'EncoderF', 'EncoderFSimple', 'DCGAN_D']
+__all__ = ['VGG16Perceptual', 'EncoderF', 'EncoderFZ', 'DCGAN_D']
 
 
 class DCGAN_D(nn.Module):
@@ -79,32 +79,6 @@ class VGG16Perceptual():
             loss += feat1.sub(feat2).pow(2).mean()
 
         return loss / len(self.idx_targets)
-
-
-class EncoderF(nn.Module):
-    def __init__(self, nc=128, cls_ch=128, k_sz=3):
-        super().__init__()
-        self.layers = []
-        self.input_conv = nn.Conv2d(3, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
-        self.block1 = SimpleBlockWithAGN(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
-        self.block2 = SimpleBlockWithAGN(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
-        self.block3 = SimpleBlockWithAGN(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
-        self.block4 = SimpleBlockWithAGN(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
-
-    def forward(self, x, c):
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
-
-        x = F.relu(self.input_conv(x), True)  # 256, 256, 128
-        x = F.avg_pool2d(x, [2, 2])          # 128, 128
-        x = F.relu(self.block1(x, c), True)  # 128, 128, 256
-        x = F.avg_pool2d(x, [2, 2])  # 64,  64
-        x = F.relu(self.block2(x, c), True)  # 64,  64, 512
-        x = F.avg_pool2d(x, [2, 2])  # 32,  32
-        x = F.relu(self.block3(x, c), True)  # 32,  32, 1024
-        x = F.avg_pool2d(x, [2, 2])  # 16,  16
-        x = self.block4(x, c)  # 16,  16, 1024
-        return x
 
 
 class AdaptiveGroupNorm(nn.Module):
@@ -201,7 +175,7 @@ class SimpleBlock(nn.Module):
         return x + r
 
 
-class EncoderFSimple(nn.Module):
+class EncoderF(nn.Module):
     def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3):
         super().__init__()
         self.layers = []
@@ -225,3 +199,62 @@ class EncoderFSimple(nn.Module):
         x = F.avg_pool2d(x, [2, 2])  # 16,  16
         x = self.block4(x)  # 16, 1024
         return x
+
+
+class EncoderFZ(nn.Module):
+    def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3, dim_z=512):
+        super().__init__()
+        self.layers = []
+        self.input_conv = nn.Conv2d(in_ch, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
+        self.block1 = SimpleBlock(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
+        self.block2 = SimpleBlock(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
+        self.block3 = SimpleBlock(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
+        self.block4 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+        self.block5 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 8,  8, 1024
+        self.block6 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 4,  4, 1024
+        self.mlp = nn.Linear(8 * nc, dim_z)  # 4,  4, 1024
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+
+        x = self.input_conv(x)  # 256, 256, 128
+        x = F.relu(x, True)  # 256, 256, 128
+        x = F.avg_pool2d(x, [2, 2])          # 128, 128
+
+        x = self.block1(x)
+        x = F.relu(x, True)  # 128, 128, 256
+        x = F.avg_pool2d(x, [2, 2])  # 64,  64
+
+        x = self.block2(x)
+        x = F.relu(x, True)  # 64,  64, 512
+        x = F.avg_pool2d(x, [2, 2])  # 32,  32
+
+        x = self.block3(x)
+        x = F.relu(x, True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [2, 2])  # 16,  16
+
+        x = self.block4(x)  # 16, 1024
+        z = F.relu(x, True)  # 32,  32, 1024
+        z = F.avg_pool2d(z, [2, 2])  # 16,  16
+
+        z = self.block5(z)  # 16, 1024
+        z = F.relu(z, True)  # 32,  32, 1024
+        z = F.avg_pool2d(z, [2, 2])  # 16,  16
+
+        z = self.block6(z)  # 16, 1024
+        z = F.relu(z, True)  # 32,  32, 1024
+        z = F.avg_pool2d(z, [4, 4])  # 16,  16
+        
+        z = self.mlp(z.view(x.size()[0], -1))
+
+        return x, z
+
+
+if __name__ == '__main__':
+    x = torch.randn(4, 3, 256, 256) 
+    model = EncoderFZ()
+    y, z = model(x)
+    print(x.shape)
+    print(y.shape)
+    print(z.shape)
