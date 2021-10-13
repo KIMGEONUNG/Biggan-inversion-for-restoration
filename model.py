@@ -296,7 +296,7 @@ class EncoderZ(nn.Module):
         x = F.relu(x, True)  # 32,  32, 1024
         x = F.avg_pool2d(x, [4, 4])  # 16,  16
         
-        z = self.mlp(x.view(x.sixe()[0], -1))
+        z = self.mlp(x.view(x.size()[0], -1))
 
         return z
 

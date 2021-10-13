@@ -32,7 +32,7 @@ def parse():
     parser.add_argument('--num_feat_layer', type=int, default=4)
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
-    parser.add_argument('--num_epoch', type=int, default=30)
+    parser.add_argument('--num_epoch', type=int, default=100)
     parser.add_argument('--interval_save', type=int, default=3)
     parser.add_argument('--size_batch', type=int, default=8)
     parser.add_argument('--truncation', type=float, default=1.0)
@@ -157,7 +157,7 @@ def main(args):
     print(args)
     targets = ['loss_mse', 'loss_lpips', 'loss_hsv', 'loss_adv',
             'coef_mse', 'coef_lpips', 'coef_hsv', 'gray_inv']
-    log_name = make_log_name(args, 'encoder', targets)
+    log_name = make_log_name(args, 'encoder_z', targets)
 
     if args.seed >= 0:
         set_seed(args.seed)
@@ -185,7 +185,7 @@ def main(args):
     if args.gray_inv:
         in_ch = 1
 
-    encoder = EncoderFZ(in_ch).to(DEV)
+    encoder = EncoderZ(in_ch).to(DEV)
 
     # Latents
     class_vector = one_hot_from_int([args.class_index],
@@ -195,9 +195,6 @@ def main(args):
 
     opt_target = []
     opt_target += list(encoder.parameters())
-
-    with torch.no_grad():
-        embd = generator.embeddings(class_vector)
 
     # Optimizer
     optimizer_g = optim.Adam(opt_target, lr=args.lr, betas=(args.b1, args.b2))
@@ -236,14 +233,8 @@ def main(args):
             if args.gray_inv:
                 x_ = transforms.Grayscale()(x_)
 
-            # z = truncated_noise_sample(truncation=args.truncation,
-            #         batch_size=args.size_batch)
-            # z = torch.from_numpy(z)
-            # z = z.to(DEV)
-
-            f, z = encoder(x_)
-            output = generator.forward_from(z, class_vector,
-                    args.truncation, f, args.num_feat_layer)
+            z = encoder(x_)
+            output = generator(z, class_vector, args.truncation)
             output = output.add(1).div(2)
 
             # Loss
@@ -306,9 +297,8 @@ def main(args):
                 writer.add_scalar('generator', loss_g.item(), num_iter)
                 writer.add_scalar('discriminator', loss_d.item(), num_iter)
                 with torch.no_grad():
-                    f, z = encoder(x_test.to(DEV))
-                    output = generator.forward_from(z, class_vector,
-                            args.truncation, f, args.num_feat_layer)
+                    z = encoder(x_test.to(DEV))
+                    output = generator(z, class_vector, args.truncation)
                     output = output.add(1).div(2)
                     grid = make_grid(output, nrow=4)
                     writer.add_image('recon', grid, num_iter)
