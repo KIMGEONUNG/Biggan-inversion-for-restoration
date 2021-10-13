@@ -54,7 +54,7 @@ def parse():
     parser.add_argument('--loss_mse', action='store_true', default=False)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
-    parser.add_argument('--loss_adv', action='store_true', default=True)
+    parser.add_argument('--loss_adv', action='store_true', default=False)
 
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
