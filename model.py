@@ -202,7 +202,7 @@ class EncoderF(nn.Module):
 
 
 class EncoderFZ(nn.Module):
-    def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3, dim_z=512):
+    def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3, dim_z=128):
         super().__init__()
         self.layers = []
         self.input_conv = nn.Conv2d(in_ch, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
@@ -250,6 +250,55 @@ class EncoderFZ(nn.Module):
 
         return x, z
 
+
+class EncoderZ(nn.Module):
+    def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3, dim_z=128):
+        super().__init__()
+        self.layers = []
+        self.input_conv = nn.Conv2d(in_ch, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
+        self.block1 = SimpleBlock(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
+        self.block2 = SimpleBlock(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
+        self.block3 = SimpleBlock(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
+        self.block4 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+        self.block5 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 8,  8, 1024
+        self.block6 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 4,  4, 1024
+        self.mlp = nn.Linear(8 * nc, dim_z)  # 4,  4, 1024
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+
+        x = self.input_conv(x)  # 256, 256, 128
+        x = F.relu(x, True)  # 256, 256, 128
+        x = F.avg_pool2d(x, [2, 2])          # 128, 128
+
+        x = self.block1(x)
+        x = F.relu(x, True)  # 128, 128, 256
+        x = F.avg_pool2d(x, [2, 2])  # 64,  64
+
+        x = self.block2(x)
+        x = F.relu(x, True)  # 64,  64, 512
+        x = F.avg_pool2d(x, [2, 2])  # 32,  32
+
+        x = self.block3(x)
+        x = F.relu(x, True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [2, 2])  # 16,  16
+
+        x = self.block4(x)  # 16, 1024
+        x = F.relu(x, True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [2, 2])  # 16,  16
+
+        x = self.block5(x)  # 16, 1024
+        x = F.relu(x, True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [2, 2])  # 16,  16
+
+        x = self.block6(x)  # 16, 1024
+        x = F.relu(x, True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [4, 4])  # 16,  16
+        
+        z = self.mlp(x.view(x.sixe()[0], -1))
+
+        return z
 
 if __name__ == '__main__':
     x = torch.randn(4, 3, 256, 256) 

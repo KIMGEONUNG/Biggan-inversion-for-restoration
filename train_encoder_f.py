@@ -14,7 +14,7 @@ from tqdm import tqdm
 import argparse
 from torchvision.utils import make_grid
 
-from model import VGG16Perceptual, EncoderF, EncoderFSimple, DCGAN_D 
+from model import VGG16Perceptual, EncoderF, EncoderFZ, DCGAN_D, EncoderZ 
 import numpy as np
 import random
 
@@ -91,7 +91,6 @@ def conversion(fn, x):
 
 def rgb2hsv_torch(rgb):
     # float and aleady normalized 
-
     arr = rgb
     out = torch.zeros_like(rgb)
 
@@ -186,7 +185,7 @@ def main(args):
     if args.gray_inv:
         in_ch = 1
 
-    encoder = EncoderFSimple(in_ch).to(DEV)
+    encoder = EncoderFZ(in_ch).to(DEV)
 
     # Latents
     class_vector = one_hot_from_int([args.class_index],
@@ -237,13 +236,13 @@ def main(args):
             if args.gray_inv:
                 x_ = transforms.Grayscale()(x_)
 
-            noise_vector = truncated_noise_sample(truncation=args.truncation,
-                    batch_size=args.size_batch)
-            noise_vector = torch.from_numpy(noise_vector)
-            noise_vector = noise_vector.to(DEV)
+            # z = truncated_noise_sample(truncation=args.truncation,
+            #         batch_size=args.size_batch)
+            # z = torch.from_numpy(z)
+            # z = z.to(DEV)
 
-            f = encoder(x_)
-            output = generator.forward_from(noise_vector, class_vector,
+            f, z = encoder(x_)
+            output = generator.forward_from(z, class_vector,
                     args.truncation, f, args.num_feat_layer)
             output = output.add(1).div(2)
 
@@ -281,7 +280,6 @@ def main(args):
             optimizer_g.zero_grad()
             loss.backward(retain_graph=True)
             optimizer_g.step()
-            
             # discriminator
             if args.loss_adv:
                 label = torch.full((args.size_batch,), real_label, 
@@ -308,8 +306,8 @@ def main(args):
                 writer.add_scalar('generator', loss_g.item(), num_iter)
                 writer.add_scalar('discriminator', loss_d.item(), num_iter)
                 with torch.no_grad():
-                    f = encoder(x_test.to(DEV))
-                    output = generator.forward_from(noise_vector_test, class_vector,
+                    f, z = encoder(x_test.to(DEV))
+                    output = generator.forward_from(z, class_vector,
                             args.truncation, f, args.num_feat_layer)
                     output = output.add(1).div(2)
                     grid = make_grid(output, nrow=4)
