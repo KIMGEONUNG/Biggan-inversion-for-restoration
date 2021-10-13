@@ -20,6 +20,7 @@ import random
 
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
+from utils import set_seed, make_log_name, hsv_loss 
 
 
 DEV = 'cuda'
@@ -64,101 +65,9 @@ def parse():
     return parser.parse_args()
 
 
-def set_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    np.random.seed(seed)
-    random.seed(seed)
-
-
-def conversion(fn, x):
-    if len(x.shape) == 4:
-        x = x.permute(0, 2, 3, 1)
-    else:
-        x = x.permute(1, 2, 0)
-
-    x = fn(x)
-
-    if len(x.shape) == 4:
-        x = x.permute(0, 3, 1, 2)
-    else:
-        x = x.permute(2, 0, 1)
-    return x
-
-
-def rgb2hsv_torch(rgb):
-    # float and aleady normalized 
-
-    arr = rgb
-    out = torch.zeros_like(rgb)
-
-    # -- V channel
-    out_v, _ = arr.max(-1)
-
-    # -- S channel
-    delta = arr.max(-1).values - arr.min(-1).values
-
-    out_s = delta / out_v
-    out_s[delta == 0.] = 0.
-
-    # -- H channel
-    # red is max
-    idx = (arr[..., 0] == out_v)
-    out[..., 0][idx] = (arr[..., 1][idx] - arr[..., 2][idx]) / delta[idx]
-
-    # green is max
-    idx = (arr[..., 1] == out_v)
-    out[..., 0][idx] = 2. + (arr[..., 2][idx] - arr[..., 0][idx]) / delta[idx]
-
-    # blue is max
-    idx = (arr[..., 2] == out_v)
-    out[..., 0][idx] = 4. + (arr[..., 0][idx] - arr[..., 1][idx]) / delta[idx]
-    out_h = (out[..., 0] / 6.) % 1.
-    out_h[delta == 0.] = 0.
-
-    out[..., 0] = out_h
-    out[..., 1] = out_s
-    out[..., 2] = out_v
-
-    # # remove NaN
-    out[torch.isnan(out)] = 0
-
-    return out
-
-
-def hsv_loss(x1, x2):
-    x1_hsv = conversion(rgb2hsv_torch, x1)
-    x2_hsv = conversion(rgb2hsv_torch, x2)
-    return nn.MSELoss()(x1_hsv, x2_hsv)
-
-
-def make_log_name(args, name, targets):
-    for k, v in args._get_kwargs():
-        if k not in targets:
-            continue
-        if type(v) == int:
-            name += '+%s:%d' % (k, v)
-            continue
-        if type(v) == str:
-            name += '+%s:%s' % (k, v)
-            continue
-        if type(v) == float:
-            name += '+%s:%4.2f' % (k, v)
-            continue
-        if type(v) == bool:
-            name += '+%s:%s' % (k, str(v))
-            continue
-    return name
-
-
 def main(args):
     print(args)
-    targets = ['loss_mse', 'loss_lpips', 'loss_hsv', 'loss_adv',
-            'coef_mse', 'coef_lpips', 'coef_hsv', 'gray_inv']
-    log_name = make_log_name(args, 'encoder_f', targets)
+    log_name = make_log_name(args, 'encoder_f')
 
     if args.seed >= 0:
         set_seed(args.seed)
