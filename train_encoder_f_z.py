@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import ToPILImage, ToTensor
+from torchvision.transforms import ToTensor
 import torchvision.transforms as transforms
 from pytorch_pretrained_biggan import (BigGAN, one_hot_from_int,
         truncated_noise_sample)
@@ -14,13 +14,11 @@ from tqdm import tqdm
 import argparse
 from torchvision.utils import make_grid
 
-from model import VGG16Perceptual, EncoderF, EncoderZ ,DCGAN_D
-import numpy as np
-import random
+from model import VGG16Perceptual, EncoderF, EncoderZ, DCGAN_D
 
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
-from utils import set_seed, make_log_name, hsv_loss 
+from utils import set_seed, make_log_name, hsv_loss
 
 
 DEV = 'cuda'
@@ -33,7 +31,7 @@ def parse():
     parser.add_argument('--num_feat_layer', type=int, default=4)
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
-    parser.add_argument('--num_epoch', type=int, default=30)
+    parser.add_argument('--num_epoch', type=int, default=400)
     parser.add_argument('--interval_save', type=int, default=3)
     parser.add_argument('--size_batch', type=int, default=8)
     parser.add_argument('--truncation', type=float, default=1.0)
@@ -42,6 +40,8 @@ def parse():
     parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
+
+    parser.add_argument("--z_mean", type=float, default=9.9403)
 
     # I/O
     parser.add_argument('--path_dataset', type=str, default='dataset_encoder')
@@ -52,9 +52,9 @@ def parse():
     parser.add_argument('--gray_inv', action='store_true', default=True)
 
     # Loss
-    parser.add_argument('--loss_mse', action='store_true', default=False)
+    parser.add_argument('--loss_mse', action='store_true', default=True)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
-    parser.add_argument('--loss_hsv', action='store_true', default=True)
+    parser.add_argument('--loss_hsv', action='store_true', default=False)
     parser.add_argument('--loss_adv', action='store_true', default=False)
     parser.add_argument('--loss_z_reg', action='store_true', default=True)
 
@@ -63,14 +63,14 @@ def parse():
     parser.add_argument('--coef_lpips', type=float, default=0.05)
     parser.add_argument('--coef_gen', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
-    parser.add_argument('--coef_z_reg', type=float, default=0.001)
+    parser.add_argument('--coef_z_reg', type=float, default=0.01)
 
     return parser.parse_args()
 
 
 def main(args):
     print(args)
-    log_name = make_log_name(args, 'encoder_fz')
+    log_name = make_log_name(args, 'encoder_f_z')
 
     if args.seed >= 0:
         set_seed(args.seed)
@@ -174,7 +174,7 @@ def main(args):
                 loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
                 loss += loss_lpips
             if args.loss_z_reg:
-                loss_z_reg = args.coef_z_reg * 0.5 * z.norm()  
+                loss_z_reg = args.coef_z_reg * (z.norm() - args.z_mean).abs()  
                 loss += loss_z_reg
 
             if args.loss_adv:

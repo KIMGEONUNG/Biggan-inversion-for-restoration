@@ -201,6 +201,70 @@ class EncoderF(nn.Module):
         return x
 
 
+class EncoderZF(nn.Module):
+    def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3, dim_z=128):
+        super().__init__()
+        self.layers = []
+        self.input_conv = nn.Conv2d(in_ch, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
+        self.block1 = SimpleBlock(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
+        self.block2 = SimpleBlock(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
+        self.block3 = SimpleBlock(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
+        self.block4 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+        self.block5 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 8,  8, 1024
+        self.block6 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 4,  4, 1024
+        self.mlp = nn.Linear(8 * nc, dim_z)  # 4,  4, 1024
+
+        self.fblock1 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
+        self.fblock2 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+        self.fblock3 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+
+        x = self.input_conv(x)  # 256, 256, 128
+        x = F.relu(x, True)  # 256, 256, 128
+        x = F.avg_pool2d(x, [2, 2])          # 128, 128
+
+        x = self.block1(x)
+        x = F.relu(x, True)  # 128, 128, 256
+        x = F.avg_pool2d(x, [2, 2])  # 64,  64
+
+        x = self.block2(x)
+        x = F.relu(x, True)  # 64,  64, 512
+        x = F.avg_pool2d(x, [2, 2])  # 32,  32
+
+        x = self.block3(x)
+        f = F.relu(x, True)  # 32,  32, 1024
+        z = F.avg_pool2d(f, [2, 2])  # 16,  16
+
+        z = self.block4(z)  # 16, 1024
+        z = F.relu(z, True)  # 32,  32, 1024
+        z = F.avg_pool2d(z, [2, 2])  # 16,  16
+
+        z = self.block5(z)  # 16, 1024
+        z = F.relu(z, True)  # 32,  32, 1024
+        z = F.avg_pool2d(z, [2, 2])  # 16,  16
+
+        z = self.block6(z)  # 16, 1024
+        z = F.relu(z, True)  # 32,  32, 1024
+        z = F.avg_pool2d(z, [4, 4])  # 16,  16
+        
+        z = self.mlp(z.view(x.size()[0], -1))
+
+        # F encoder
+        f = self.fblock1(f)  # 32, 1024
+        f = F.relu(f, True)  
+        f = F.avg_pool2d(f, [2, 2])  # 16,  16
+
+        f = self.fblock2(f) 
+        f = F.relu(f, True)
+
+        f = self.fblock3(f) 
+
+        return f, z
+
+
 class EncoderFZ(nn.Module):
     def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3, dim_z=128):
         super().__init__()
@@ -301,9 +365,9 @@ class EncoderZ(nn.Module):
         return z
 
 if __name__ == '__main__':
-    x = torch.randn(4, 3, 256, 256) 
-    model = EncoderFZ()
-    y, z = model(x)
-    print(x.shape)
-    print(y.shape)
-    print(z.shape)
+
+    def count_parameters(model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    model = EncoderF()
+    print(count_parameters(model))

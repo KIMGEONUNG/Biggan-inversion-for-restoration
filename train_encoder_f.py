@@ -14,7 +14,7 @@ from tqdm import tqdm
 import argparse
 from torchvision.utils import make_grid
 
-from model import VGG16Perceptual, EncoderF, EncoderFSimple, DCGAN_D 
+from model import VGG16Perceptual, EncoderF, DCGAN_D 
 import numpy as np
 import random
 
@@ -33,9 +33,9 @@ def parse():
     parser.add_argument('--num_feat_layer', type=int, default=4)
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--class_index', type=int, default=15)
-    parser.add_argument('--num_epoch', type=int, default=30)
+    parser.add_argument('--num_epoch', type=int, default=400)
     parser.add_argument('--interval_save', type=int, default=3)
-    parser.add_argument('--size_batch', type=int, default=8)
+    parser.add_argument('--size_batch', type=int, default=16)
     parser.add_argument('--truncation', type=float, default=1.0)
     parser.add_argument('--show', action='store_false')
 
@@ -52,9 +52,9 @@ def parse():
     parser.add_argument('--gray_inv', action='store_true', default=True)
 
     # Loss
-    parser.add_argument('--loss_mse', action='store_true', default=False)
+    parser.add_argument('--loss_mse', action='store_true', default=True)
     parser.add_argument('--loss_lpips', action='store_true', default=True)
-    parser.add_argument('--loss_hsv', action='store_true', default=True)
+    parser.add_argument('--loss_hsv', action='store_true', default=False)
     parser.add_argument('--loss_adv', action='store_true', default=False)
 
     # Loss coef
@@ -95,7 +95,7 @@ def main(args):
     if args.gray_inv:
         in_ch = 1
 
-    encoder = EncoderFSimple(in_ch).to(DEV)
+    encoder = EncoderF(in_ch).to(DEV)
 
     # Latents
     class_vector = one_hot_from_int([args.class_index],
@@ -188,7 +188,7 @@ def main(args):
                 loss += loss_g
 
             optimizer_g.zero_grad()
-            loss.backward(retain_graph=True)
+            loss.backward()
             optimizer_g.step()
             
             # discriminator
@@ -224,6 +224,7 @@ def main(args):
                     grid = make_grid(output, nrow=4)
                     writer.add_image('recon', grid, num_iter)
                     writer.flush()
+                    torch.save(encoder.state_dict(), './encoder_f.ckpt') 
 
 
 if __name__ == '__main__':

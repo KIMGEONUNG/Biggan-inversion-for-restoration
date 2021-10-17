@@ -43,6 +43,8 @@ def parse():
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 
+    parser.add_argument("--z_mean", type=float, default=9.9403)
+
     # I/O
     parser.add_argument('--path_dataset', type=str, default='dataset_encoder')
     parser.add_argument('--path_config', type=str, default='./checkpoints/config.pickle')
@@ -56,12 +58,15 @@ def parse():
     parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=True)
     parser.add_argument('--loss_adv', action='store_true', default=False)
+    parser.add_argument('--loss_z_reg', action='store_true', default=True)
 
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
     parser.add_argument('--coef_gen', type=float, default=0.05)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
+    parser.add_argument('--coef_z_reg', type=float, default=0.01)
+
     return parser.parse_args()
 
 
@@ -146,11 +151,6 @@ def main(args):
             if args.gray_inv:
                 x_ = transforms.Grayscale()(x_)
 
-            # z = truncated_noise_sample(truncation=args.truncation,
-            #         batch_size=args.size_batch)
-            # z = torch.from_numpy(z)
-            # z = z.to(DEV)
-
             f, z = encoder(x_)
             output = generator.forward_from(z, class_vector,
                     args.truncation, f, args.num_feat_layer)
@@ -164,6 +164,7 @@ def main(args):
             loss_adv = torch.zeros(1)
             loss_g = torch.zeros(1)
             loss_d = torch.zeros(1)
+            loss_z_reg = torch.zeros(1)
 
             if args.loss_mse:
                 loss_mse = args.coef_mse * nn.MSELoss()(x, output)
@@ -174,6 +175,9 @@ def main(args):
             if args.loss_lpips:
                 loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
                 loss += loss_lpips
+            if args.loss_z_reg:
+                loss_z_reg = args.coef_z_reg * (z.norm() - args.z_mean).abs()  
+                loss += loss_z_reg
 
             if args.loss_adv:
                 bce_fn = nn.BCELoss()
@@ -215,6 +219,7 @@ def main(args):
                 writer.add_scalar('mse_hsv', loss_hsv.item(), num_iter)
                 writer.add_scalar('generator', loss_g.item(), num_iter)
                 writer.add_scalar('discriminator', loss_d.item(), num_iter)
+                writer.add_scalar('z_reg', loss_z_reg.item(), num_iter)
                 with torch.no_grad():
                     f, z = encoder(x_test.to(DEV))
                     output = generator.forward_from(z, class_vector,
