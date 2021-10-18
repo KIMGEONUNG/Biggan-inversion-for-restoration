@@ -1,5 +1,6 @@
 samples
 *.jpg
+*.ckpt
 __pycache__
 *log_loss.txt
 runs
