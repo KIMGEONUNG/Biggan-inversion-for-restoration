@@ -43,7 +43,7 @@ class VGG16Perceptual():
             normalized_input=True,
             dev='cuda'):
 
-        self.model = torch.hub.load('pytorch/vision:v0.8.2', 'vgg16',
+        self.model = torch.hub.load('pytorch/vision:v0.11.0', 'vgg16',
                 pretrained=True).to(dev).eval()
 
         self.normalized_intput = normalized_input
