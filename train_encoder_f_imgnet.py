@@ -24,7 +24,21 @@ from utils import set_seed, make_log_name, hsv_loss
 
 
 DEV = 'cuda'
-IS_MULTIGPU = True
+
+
+class Inversion(nn.Module):
+
+    def __init__(self, ch_in=1, resolution=256):
+        super().__init__()
+        name_model = 'biggan-deep-%d' % (resolution)
+        self.encoder = EncoderF(ch_in)
+        self.biggan = BigGAN.from_pretrained(name_model)
+
+    def forward(self, x, z, c):
+        f = self.encoder(x)
+        output = self.biggan(z, c, 1.0, f, 4)
+        output = output.add(1).div(2)
+        return output
 
 
 def parse():
@@ -35,7 +49,7 @@ def parse():
     parser.add_argument('--resolution', type=str, default='256')
     parser.add_argument('--num_epoch', type=int, default=1000)
     parser.add_argument('--interval_save', type=int, default=50)
-    parser.add_argument('--size_batch', type=int, default=16)
+    parser.add_argument('--size_batch', type=int, default=64)
     parser.add_argument('--truncation', type=float, default=1.0)
     parser.add_argument('--show', action='store_false')
 
@@ -76,26 +90,17 @@ def main(args):
     print('logger name:', path_log)
 
     # Model
-    name_model = 'biggan-deep-%s' % (args.resolution)
-    biggan = BigGAN.from_pretrained(name_model)
-    biggan.eval()
-    biggan.to(DEV)
-    biggan = nn.DataParallel(biggan)
+    model = Inversion()
+    model.to(DEV)
+    model = nn.DataParallel(model)
 
     if args.loss_lpips:
         vgg_per = VGG16Perceptual()
 
-    in_ch = 3
-    if args.gray_inv:
-        in_ch = 1
-
-    encoder = EncoderF(in_ch).to(DEV)
-    encoder.eval()
-    encoder = nn.DataParallel(encoder)
-
+    model.module.biggan.eval()
 
     opt_target = []
-    opt_target += list(encoder.parameters())
+    opt_target += list(model.module.encoder.parameters())
 
     # Optimizer
     optimizer_g = optim.Adam(opt_target, lr=args.lr, betas=(args.b1, args.b2))
@@ -111,55 +116,28 @@ def main(args):
             num_workers=8, drop_last=True)
 
     # Fix valid
-    with torch.no_grad():
-        x_test, x_test_class_index = next(iter(dataloader))
-        grid_init = make_grid(x_test, nrow=4)
-        writer.add_image('GT', grid_init)
-        writer.flush()
-        if args.gray_inv:
-            x_test = transforms.Grayscale()(x_test)
-
-
-        noise_vector_test = truncated_noise_sample(truncation=args.truncation,
-                batch_size=args.size_batch)
-        noise_vector_test = torch.from_numpy(noise_vector_test)
-        noise_vector_test = noise_vector_test.to(DEV)
-
-        x_test_class_index = one_hot_from_int(x_test_class_index, batch_size=args.size_batch)
-        x_test_class_index = torch.from_numpy(x_test_class_index)
-        x_test_class_index = x_test_class_index.to(DEV)
-        
-    truncation = torch.FloatTensor([args.truncation]).to(DEV)
-    num_feat_layer = torch.IntTensor([args.num_feat_layer]).to(DEV)
-
     num_iter = 0
     for epoch in range(args.num_epoch):
         for i, (x, class_index) in enumerate(tqdm(dataloader)):
             num_iter += 1
+
+            # Input
+            x_gt = x.to(DEV)
             x = x.to(DEV)
-            x_ = x.to(DEV)
+            x = transforms.Grayscale()(x)
 
             # Latents
-            class_vector = one_hot_from_int(class_index, batch_size=args.size_batch)
-            class_vector = torch.from_numpy(class_vector)
-            class_vector = class_vector.to(DEV)
+            c = one_hot_from_int(class_index, batch_size=args.size_batch)
+            c = torch.from_numpy(c)
+            c = c.to(DEV)
 
-            if args.gray_inv:
-                x_ = transforms.Grayscale()(x_)
-
-            noise_vector = truncated_noise_sample(truncation=args.truncation,
+            # Noise
+            z = truncated_noise_sample(truncation=args.truncation,
                     batch_size=args.size_batch)
-            noise_vector = torch.from_numpy(noise_vector)
-            noise_vector = noise_vector.to(DEV)
+            z = torch.from_numpy(z)
+            z = z.to(DEV)
 
-            print(x_.shape)
-            f = encoder(x_)
-            print(f.shape)
-            output = biggan(noise_vector, class_vector,
-                    truncation, f, num_feat_layer)
-            print(output.shape)
-            exit()
-            output = output.add(1).div(2)
+            output = model(x, z ,c)
 
             # Loss
             loss = 0
@@ -168,13 +146,13 @@ def main(args):
             loss_hsv = torch.zeros(1)
 
             if args.loss_mse:
-                loss_mse = args.coef_mse * nn.MSELoss()(x, output)
+                loss_mse = args.coef_mse * nn.MSELoss()(x_gt, output)
                 loss += loss_mse
             if args.loss_hsv:
-                loss_hsv = args.coef_hsv * hsv_loss(x, output)
+                loss_hsv = args.coef_hsv * hsv_loss(x_gt, output)
                 loss += loss_hsv
             if args.loss_lpips:
-                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x, output)
+                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x_gt, output)
                 loss += loss_lpips
 
             optimizer_g.zero_grad()
@@ -187,15 +165,15 @@ def main(args):
                 writer.add_scalar('mse_rgb', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 writer.add_scalar('mse_hsv', loss_hsv.item(), num_iter)
-                with torch.no_grad():
-                    f = encoder(x_test.to(DEV))
-                    output = biggan(noise_vector_test, x_test_class_index,
-                            truncation, f, num_feat_layer)
-                    output = output.add(1).div(2)
-                    grid = make_grid(output, nrow=4)
-                    writer.add_image('recon', grid, num_iter)
-                    writer.flush()
-                    torch.save(encoder.state_dict(), './encoder_f.ckpt') 
+                # with torch.no_grad():
+                #     f = encoder(x_test.to(DEV))
+                #     output = biggan(noise_vector_test, x_test_class_index,
+                #             truncation, f, num_feat_layer)
+                #     output = output.add(1).div(2)
+                #     grid = make_grid(output, nrow=4)
+                #     writer.add_image('recon', grid, num_iter)
+                #     writer.flush()
+                #     torch.save(encoder.state_dict(), './encoder_f.ckpt') 
 
 
 if __name__ == '__main__':
