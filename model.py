@@ -36,15 +36,23 @@ class DCGAN_D(nn.Module):
 
         return validity
 
-class VGG16Perceptual():
+
+class VGG16Perceptual(nn.Module):
 
     def __init__(self,
             resize=True,
             normalized_input=True,
+            load_pickle=True,
             dev='cuda'):
+        super().__init__()
 
-        self.model = torch.hub.load('pytorch/vision:v0.11.0', 'vgg16',
-                pretrained=True).to(dev).eval()
+        if load_pickle:
+            import pickle 
+            with open('./vgg16.pickle', 'rb') as f:
+                self.model = pickle.load(f)
+        else:
+            self.model = torch.hub.load('pytorch/vision:v0.8.2', 'vgg16',
+                    pretrained=True).to(dev).eval()
 
         self.normalized_intput = normalized_input
         self.dev = dev
@@ -79,6 +87,9 @@ class VGG16Perceptual():
             loss += feat1.sub(feat2).pow(2).mean()
 
         return loss / len(self.idx_targets)
+
+    def forward(self, x1, x2):
+        return self.perceptual_loss(x1, x2)
 
 
 class AdaptiveGroupNorm(nn.Module):
