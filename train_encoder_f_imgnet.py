@@ -77,11 +77,10 @@ def main(args):
 
     # Model
     name_model = 'biggan-deep-%s' % (args.resolution)
-    generator = BigGAN.from_pretrained(name_model)
-    generator.eval()
-    generator.to(DEV)
-
-    generator = nn.DataParallel(generator)
+    biggan = BigGAN.from_pretrained(name_model)
+    biggan.eval()
+    biggan.to(DEV)
+    biggan = nn.DataParallel(biggan)
 
     if args.loss_lpips:
         vgg_per = VGG16Perceptual()
@@ -91,6 +90,7 @@ def main(args):
         in_ch = 1
 
     encoder = EncoderF(in_ch).to(DEV)
+    encoder.eval()
     encoder = nn.DataParallel(encoder)
 
 
@@ -119,6 +119,7 @@ def main(args):
         if args.gray_inv:
             x_test = transforms.Grayscale()(x_test)
 
+
         noise_vector_test = truncated_noise_sample(truncation=args.truncation,
                 batch_size=args.size_batch)
         noise_vector_test = torch.from_numpy(noise_vector_test)
@@ -127,6 +128,9 @@ def main(args):
         x_test_class_index = one_hot_from_int(x_test_class_index, batch_size=args.size_batch)
         x_test_class_index = torch.from_numpy(x_test_class_index)
         x_test_class_index = x_test_class_index.to(DEV)
+        
+    truncation = torch.FloatTensor([args.truncation]).to(DEV)
+    num_feat_layer = torch.IntTensor([args.num_feat_layer]).to(DEV)
 
     num_iter = 0
     for epoch in range(args.num_epoch):
@@ -148,9 +152,13 @@ def main(args):
             noise_vector = torch.from_numpy(noise_vector)
             noise_vector = noise_vector.to(DEV)
 
+            print(x_.shape)
             f = encoder(x_)
-            output = generator.forward_from(noise_vector, class_vector,
-                    args.truncation, f, args.num_feat_layer)
+            print(f.shape)
+            output = biggan(noise_vector, class_vector,
+                    truncation, f, num_feat_layer)
+            print(output.shape)
+            exit()
             output = output.add(1).div(2)
 
             # Loss
@@ -181,8 +189,8 @@ def main(args):
                 writer.add_scalar('mse_hsv', loss_hsv.item(), num_iter)
                 with torch.no_grad():
                     f = encoder(x_test.to(DEV))
-                    output = generator.forward_from(noise_vector_test, x_test_class_index,
-                            args.truncation, f, args.num_feat_layer)
+                    output = biggan(noise_vector_test, x_test_class_index,
+                            truncation, f, num_feat_layer)
                     output = output.add(1).div(2)
                     grid = make_grid(output, nrow=4)
                     writer.add_image('recon', grid, num_iter)

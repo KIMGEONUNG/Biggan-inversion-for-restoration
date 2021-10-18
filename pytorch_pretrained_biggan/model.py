@@ -225,44 +225,29 @@ class Generator(nn.Module):
         self.conv_to_rgb = snconv2d(in_channels=ch, out_channels=ch, kernel_size=3, padding=1, eps=config.eps)
         self.tanh = nn.Tanh()
 
-    def forward(self, cond_vector, truncation):
-        z = self.gen_z(cond_vector)
+    # def forward(self, cond_vector, truncation):
+    #     z = self.gen_z(cond_vector)
+    #
+    #     # We use this conversion step to be able to use TF weights:
+    #     # TF convention on shape is [batch, height, width, channels]
+    #     # PT convention on shape is [batch, channels, height, width]
+    #     z = z.view(-1, 4, 4, 16 * self.config.channel_width)
+    #     z = z.permute(0, 3, 1, 2).contiguous()
+    #
+    #     for i, layer in enumerate(self.layers):
+    #         if isinstance(layer, GenBlock):
+    #             z = layer(z, cond_vector, truncation)
+    #         else:
+    #             z = layer(z)
+    #
+    #     z = self.bn(z, truncation)
+    #     z = self.relu(z)
+    #     z = self.conv_to_rgb(z)
+    #     z = z[:, :3, ...]
+    #     z = self.tanh(z)
+    #     return z
 
-        # We use this conversion step to be able to use TF weights:
-        # TF convention on shape is [batch, height, width, channels]
-        # PT convention on shape is [batch, channels, height, width]
-        z = z.view(-1, 4, 4, 16 * self.config.channel_width)
-        z = z.permute(0, 3, 1, 2).contiguous()
-
-        for i, layer in enumerate(self.layers):
-            if isinstance(layer, GenBlock):
-                z = layer(z, cond_vector, truncation)
-            else:
-                z = layer(z)
-
-        z = self.bn(z, truncation)
-        z = self.relu(z)
-        z = self.conv_to_rgb(z)
-        z = z[:, :3, ...]
-        z = self.tanh(z)
-        return z
-
-    def forward_to(self, cond_vector, truncation, num):
-        z = self.gen_z(cond_vector)
-
-        z = z.view(-1, 4, 4, 16 * self.config.channel_width)
-        z = z.permute(0, 3, 1, 2).contiguous()
-
-        for i, layer in enumerate(self.layers):
-            if i == num:
-                return z
-            if isinstance(layer, GenBlock):
-                z = layer(z, cond_vector, truncation)
-            else:
-                z = layer(z)
-        raise
-
-    def forward_from(self, cond_vector, truncation, z, num):
+    def forward(self, cond_vector, truncation, z, num):
         for i, layer in enumerate(self.layers):
             if i < num:
                 continue
@@ -318,31 +303,22 @@ class BigGAN(nn.Module):
         self.embeddings = nn.Linear(config.num_classes, config.z_dim, bias=False)
         self.generator = Generator(config)
 
-    def forward(self, z, class_label, truncation):
+    # def forward(self, z, class_label, truncation):
+    #     assert 0 < truncation <= 1
+    #
+    #     embed = self.embeddings(class_label)
+    #     cond_vector = torch.cat((z, embed), dim=1)
+    #
+    #     z = self.generator(cond_vector, truncation)
+    #     return z
+
+    def forward(self, z, class_label, truncation, f, num):
         assert 0 < truncation <= 1
 
         embed = self.embeddings(class_label)
         cond_vector = torch.cat((z, embed), dim=1)
 
-        z = self.generator(cond_vector, truncation)
-        return z
-
-    def forward_to(self, z, class_label, truncation, num):
-        assert 0 < truncation <= 1
-
-        embed = self.embeddings(class_label)
-        cond_vector = torch.cat((z, embed), dim=1)
-
-        z = self.generator.forward_to(cond_vector, truncation, num)
-        return z
-
-    def forward_from(self, z, class_label, truncation, f, num):
-        assert 0 < truncation <= 1
-
-        embed = self.embeddings(class_label)
-        cond_vector = torch.cat((z, embed), dim=1)
-
-        z = self.generator.forward_from(cond_vector, truncation, f, num)
+        z = self.generator(cond_vector, truncation, f, num)
         return z
 
 if __name__ == "__main__":
