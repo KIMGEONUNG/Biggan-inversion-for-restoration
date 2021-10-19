@@ -65,7 +65,7 @@ def parse():
 
     # Loss
     parser.add_argument('--loss_mse', action='store_true', default=True)
-    parser.add_argument('--loss_lpips', action='store_true', default=False)
+    parser.add_argument('--loss_lpips', action='store_true', default=True)
     parser.add_argument('--loss_hsv', action='store_true', default=False)
 
     # Loss coef
@@ -96,6 +96,8 @@ def main(args):
 
     if args.loss_lpips:
         vgg_per = VGG16Perceptual()
+        vgg_per.to(DEV)
+        # vgg_per = nn.DataParallel(vgg_per)
 
     model.module.biggan.eval()
 
@@ -152,7 +154,7 @@ def main(args):
                 loss_hsv = args.coef_hsv * hsv_loss(x_gt, output)
                 loss += loss_hsv
             if args.loss_lpips:
-                loss_lpips = args.coef_lpips * vgg_per.perceptual_loss(x_gt, output)
+                loss_lpips = args.coef_lpips * vgg_per(x_gt, output)
                 loss += loss_lpips
 
             optimizer_g.zero_grad()
@@ -165,7 +167,8 @@ def main(args):
                 writer.add_scalar('mse_rgb', loss_mse.item(), num_iter)
                 writer.add_scalar('lpips', loss_lpips.item(), num_iter)
                 writer.add_scalar('mse_hsv', loss_hsv.item(), num_iter)
-                # with torch.no_grad():
+                with torch.no_grad():
+                    torch.save(model.module.encoder.state_dict(), './encoder_f.ckpt') 
                 #     f = encoder(x_test.to(DEV))
                 #     output = biggan(noise_vector_test, x_test_class_index,
                 #             truncation, f, num_feat_layer)
@@ -173,7 +176,6 @@ def main(args):
                 #     grid = make_grid(output, nrow=4)
                 #     writer.add_image('recon', grid, num_iter)
                 #     writer.flush()
-                #     torch.save(encoder.state_dict(), './encoder_f.ckpt') 
 
 
 if __name__ == '__main__':
