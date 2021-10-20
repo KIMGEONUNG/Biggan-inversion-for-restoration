@@ -31,11 +31,19 @@ def parse():
     parser.add_argument('--size_batch', type=int, default=16)
     parser.add_argument('--truncation', type=float, default=1.0)
 
+    parser.add_argument('--use_train_data', action='store_true')
+
     # I/O
-    parser.add_argument('--path_dataset', type=str,
+    parser.add_argument('--path_dataset_val', type=str,
             default='dataset_val')
-    parser.add_argument('--path_output', type=str,
-            default='validation_result')
+    parser.add_argument('--path_output_val', type=str,
+            default='validation_data_result')
+
+    parser.add_argument('--path_dataset_train', type=str,
+            default='dataset_train')
+    parser.add_argument('--path_output_train', type=str,
+            default='train_data_result')
+
     parser.add_argument('--path_ckpt_encoder', type=str,
             default='./encoder_f.ckpt')
 
@@ -67,9 +75,6 @@ def fusion(x_l, x_ab):
 def main(args):
     print(args)
 
-    if not os.path.exists(args.path_output):
-        os.mkdir(args.path_output)
-
     if args.seed >= 0:
         set_seed(args.seed)
 
@@ -86,9 +91,22 @@ def main(args):
                 transforms.Resize(256),
                 transforms.CenterCrop(256),
             ])
-    dataset = ImageFolder(args.path_dataset, transform=prep)
+
+    if args.use_train_data:
+        path_output = args.path_output_train
+        path_dataset = args.path_dataset_train
+        is_shuffle = True
+    else:
+        path_output = args.path_output_val
+        path_dataset = args.path_dataset_val
+        is_shuffle = True
+
+    dataset = ImageFolder(path_dataset, transform=prep)
     dataloader = DataLoader(dataset, batch_size=args.size_batch,
-            shuffle=False, num_workers=8, drop_last=True)
+            shuffle=is_shuffle, num_workers=8, drop_last=True)
+
+    if not os.path.exists(path_output):
+        os.mkdir(path_output)
 
     print('Iteration limit:', args.limit_iter)
 
@@ -126,9 +144,9 @@ def main(args):
             grid = torch.cat([grid_gt, grid_gray, grid_out, grid_lab], dim=-2)
             im = ToPILImage()(grid)
 
-            path_result = os.path.join(args.path_output, '%03d.jpg' % (i))
+            path_result = os.path.join(path_output, '%03d.jpg' % (i))
             im.save(path_result)
-            if i > args.limit_iter:
+            if i >= args.limit_iter:
                 break
 
 
