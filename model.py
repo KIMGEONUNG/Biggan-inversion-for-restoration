@@ -175,6 +175,61 @@ class SimpleBlock(nn.Module):
         return x + r
 
 
+class EncoderFProgressive(nn.Module):
+    def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3):
+        super().__init__()
+        self.layers = []
+        self.input_conv = nn.Conv2d(in_ch, 1 * nc, k_sz, 1, 1)  # 256, 256, 128
+        self.block1 = SimpleBlock(1 * nc, 2 * nc, cls_ch, k_sz)  # 128, 128, 256
+        self.block2 = SimpleBlock(2 * nc, 4 * nc, cls_ch, k_sz)  # 64,  64, 512
+        self.block3 = SimpleBlock(4 * nc, 8 * nc, cls_ch, k_sz)  # 32,  32, 1024
+        self.block4 = SimpleBlock(8 * nc, 8 * nc, cls_ch, k_sz)  # 16,  16, 1024
+        self.block5 = SimpleBlock(8 * nc, 16 * nc, cls_ch, k_sz)  # 8,  8, 2024
+        self.block6 = SimpleBlock(16 * nc, 16 * nc, cls_ch, k_sz)  # 4,  4, 2024
+
+    def forward(self, x, dim_spatial=1):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+
+        x = self.input_conv(x)  # 256, 256, 128
+        x = F.relu(x, True)  # 256, 256, 128
+        x = F.avg_pool2d(x, [2, 2])          # 128, 128
+
+        x = self.block1(x)
+        if dim_spatial == 128:
+            return x
+        x = F.relu(x, True)  # 128, 128, 256
+        x = F.avg_pool2d(x, [2, 2])  # 64,  64
+
+        x = self.block2(x)
+        if dim_spatial == 64:
+            return x
+        x = F.relu(x, True)  # 64,  64, 512
+        x = F.avg_pool2d(x, [2, 2])  # 32,  32
+
+        x = self.block3(x)
+        if dim_spatial == 32:
+            return x
+        x = F.relu(x, True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [2, 2])  # 16,  16
+
+        x = self.block4(x)  # 16, 1024
+        if dim_spatial == 16:
+            return x
+        x = F.relu(x, True)  # 32,  32, 1024
+        x = F.avg_pool2d(x, [2, 2])  # 16,  16
+
+        x = self.block5(x)  # 8, 1024
+        if dim_spatial == 8:
+            return x
+        x = F.relu(x, True)
+        x = F.avg_pool2d(x, [2, 2])
+
+        x = self.block6(x)  # 4x4
+
+        return x
+
+
 class EncoderF4X4(nn.Module):
     def __init__(self, in_ch=3, nc=128, cls_ch=128, k_sz=3):
         super().__init__()
