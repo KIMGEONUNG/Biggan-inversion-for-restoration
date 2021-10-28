@@ -3,7 +3,48 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 
-__all__ = ['VGG16Perceptual', 'EncoderF', 'EncoderFZ', 'DCGAN_D']
+# __all__ = ['VGG16Perceptual', 'EncoderF', 'EncoderFZ', 'DCGAN_D']
+
+
+class Discriminator_F(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        def block_d(ch_in, ch_out, down=False):
+            block = [
+                    # nn.Conv2d(ch_in, ch_in, 3, 1, 1),
+                    # nn.LeakyReLU(0.2, inplace=True),
+                    # nn.Dropout2d(0.25),
+                    nn.Conv2d(ch_in, ch_out, 3, 1, 1),
+                    nn.LeakyReLU(0.2, inplace=True),
+                    nn.Dropout2d(0.25),
+                    ]
+            if down:
+                block += [
+                    nn.Conv2d(ch_out, ch_out, 3, 2, 1),
+                    nn.LeakyReLU(0.2, inplace=True),
+                    nn.Dropout2d(0.25),
+                    ]
+
+            return block
+
+        self.model = nn.Sequential(
+            *block_d(1024, 512),  # 16
+            *block_d(512, 256, True), # 16
+            *block_d(256, 128), # 8 
+            *block_d(128, 64, True),  # 4 
+        )
+
+        # The height and width of downsampled image
+        ds_size = 4 
+        self.adv_layer = nn.Sequential(nn.Linear(64 * ds_size ** 2, 1), nn.Sigmoid())
+
+    def forward(self, img):
+        out = self.model(img)
+        out = out.view(out.shape[0], -1)
+        validity = self.adv_layer(out)
+
+        return validity
 
 
 class DCGAN_D(nn.Module):
