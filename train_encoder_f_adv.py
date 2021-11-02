@@ -64,7 +64,7 @@ def parse():
     # Loss coef
     parser.add_argument('--coef_mse', type=float, default=1.0)
     parser.add_argument('--coef_lpips', type=float, default=0.05)
-    parser.add_argument('--coef_gen', type=float, default=0.1)
+    parser.add_argument('--coef_gen', type=float, default=0.5)
     parser.add_argument('--coef_hsv', type=float, default=1.0)
     parser.add_argument('--coef_adv', type=float, default=1.0)
     return parser.parse_args()
