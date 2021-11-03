@@ -72,7 +72,7 @@ def parse():
 
 def main(args):
     print(args)
-    log_name = make_log_name(args, 'encoder_f_adv_02')
+    log_name = make_log_name(args, 'encoder_f_adv_03')
 
     if args.seed >= 0:
         set_seed(args.seed)

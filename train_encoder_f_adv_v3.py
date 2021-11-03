@@ -14,7 +14,7 @@ from tqdm import tqdm
 import argparse
 from torchvision.utils import make_grid
 
-from model import VGG16Perceptual, EncoderF, DCGAN_D, Discriminator_F
+from model import VGG16Perceptual, EncoderF, DCGAN_D, Discriminator_Fv2
 import numpy as np
 import random
 
@@ -72,7 +72,7 @@ def parse():
 
 def main(args):
     print(args)
-    log_name = make_log_name(args, 'encoder_f_adv_02')
+    log_name = make_log_name(args, 'encoder_f_adv_03_inorm')
 
     if args.seed >= 0:
         set_seed(args.seed)
@@ -99,7 +99,7 @@ def main(args):
     in_ch = 1
 
     encoder = EncoderF(in_ch).to(DEV)
-    discriminator = Discriminator_F().to(DEV)
+    discriminator = Discriminator_Fv2().to(DEV)
 
     # Latents
     class_vector = one_hot_from_int([args.class_index],
